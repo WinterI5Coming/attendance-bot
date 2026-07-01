@@ -64,6 +64,8 @@ class AttendanceCog(commands.Cog):
             )
             return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
         try:
             result = await self.attendance_service.check_in(
                 guild_id=guild.id,
@@ -76,13 +78,13 @@ class AttendanceCog(commands.Cog):
                 guild.id,
                 interaction.user.id,
             )
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "출석 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             self._build_check_in_message(result),
             ephemeral=True,
         )
@@ -238,8 +240,7 @@ class AttendanceCog(commands.Cog):
             checked_at = self._format_time(result.checked_at, result.timezone_name)
             return (
                 "출석 완료: 정상 출석\n"
-                f"이번 점수: +{result.score_delta}\n"
-                f"현재 총점: {result.total_score}점\n"
+                f"{self._build_score_progress(result)}\n"
                 f"처리 시각: {checked_at}"
             )
 
@@ -247,8 +248,15 @@ class AttendanceCog(commands.Cog):
             checked_at = self._format_time(result.checked_at, result.timezone_name)
             return (
                 "출석 완료: 지각\n"
-                f"이번 점수: +{result.score_delta}\n"
-                f"현재 총점: {result.total_score}점\n"
+                f"{self._build_score_progress(result)}\n"
+                f"처리 시각: {checked_at}"
+            )
+
+        if result.status is AttendanceCheckInStatus.EXCUSED_LATE:
+            checked_at = self._format_time(result.checked_at, result.timezone_name)
+            return (
+                "출석 완료: 사유 지각\n"
+                f"{self._build_score_progress(result)}\n"
                 f"처리 시각: {checked_at}"
             )
 
@@ -373,6 +381,19 @@ class AttendanceCog(commands.Cog):
             ],
         ]
         sections.append("\n".join(lines))
+
+    def _build_score_progress(self, result: AttendanceCheckInResult) -> str:
+        """Build score, streak bonus, and rank-change lines."""
+
+        lines = [
+            f"이번 점수: {result.score_delta:+d}",
+        ]
+        if result.streak_bonus_delta:
+            lines.append(f"연속 출석 보너스: {result.streak_bonus_delta:+d}")
+        lines.append(f"현재 총점: {result.total_score}점")
+        if result.rank_changed:
+            lines.append(f"계급 변경: {result.previous_rank} → {result.current_rank}")
+        return "\n".join(lines)
 
     def _format_time(
         self,
