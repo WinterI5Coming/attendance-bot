@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from bot.config import Settings
 from bot.repositories.guild_repository import GuildRepository
+from bot.utils.time_utils import build_session_window, get_server_today, parse_hhmm
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,17 @@ class GuildSetupResult:
     late_deadline: str
     close_deadline: str
     excuse_mode: str
+
+
+@dataclass(frozen=True)
+class AttendanceTimeUpdateResult:
+    """Result of updating attendance time settings."""
+
+    status: str
+    attendance_start: str | None = None
+    late_deadline: str | None = None
+    close_deadline: str | None = None
+    today_session_status: str | None = None
 
 
 class GuildService:
@@ -113,3 +125,77 @@ class GuildService:
         """
 
         return await self.repository.list_all_settings()
+
+    async def update_attendance_times(
+        self,
+        *,
+        guild_id: int,
+        attendance_start: str,
+        late_deadline: str,
+        close_deadline: str,
+        now: datetime,
+    ) -> AttendanceTimeUpdateResult:
+        """Update attendance start, late, and close times for a guild."""
+
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be a timezone-aware datetime.")
+
+        try:
+            start_time = parse_hhmm(attendance_start)
+            late_time = parse_hhmm(late_deadline)
+            close_time = parse_hhmm(close_deadline)
+        except ValueError:
+            return AttendanceTimeUpdateResult(status="INVALID_TIME")
+
+        if not start_time < late_time < close_time:
+            return AttendanceTimeUpdateResult(status="INVALID_ORDER")
+
+        guild_id_text = str(guild_id)
+        settings = await self.repository.get_by_guild_id(guild_id_text)
+        if settings is None:
+            return AttendanceTimeUpdateResult(status="NOT_CONFIGURED")
+
+        now_text = now.isoformat()
+        updated = await self.repository.update_attendance_times(
+            guild_id=guild_id_text,
+            attendance_start=attendance_start,
+            late_deadline=late_deadline,
+            close_deadline=close_deadline,
+            now=now_text,
+        )
+        if not updated:
+            return AttendanceTimeUpdateResult(status="NOT_CONFIGURED")
+
+        local_date = get_server_today(now, settings["timezone"])
+        window = build_session_window(
+            attendance_date=local_date,
+            attendance_start=attendance_start,
+            late_deadline=late_deadline,
+            close_deadline=close_deadline,
+            timezone_name=settings["timezone"],
+        )
+        if now < window.start_at:
+            session_status = "SCHEDULED"
+            opened_at = None
+        else:
+            session_status = "OPEN"
+            opened_at = now_text
+
+        today_session_status = await self.repository.update_session_window_if_unrecorded(
+            guild_id=guild_id_text,
+            attendance_date=local_date.isoformat(),
+            start_at=window.start_at.isoformat(),
+            late_at=window.late_at.isoformat(),
+            close_at=window.close_at.isoformat(),
+            status=session_status,
+            opened_at=opened_at,
+            now=now_text,
+        )
+
+        return AttendanceTimeUpdateResult(
+            status="UPDATED",
+            attendance_start=attendance_start,
+            late_deadline=late_deadline,
+            close_deadline=close_deadline,
+            today_session_status=today_session_status,
+        )

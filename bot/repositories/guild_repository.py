@@ -158,6 +158,122 @@ class GuildRepository:
         finally:
             await connection.close()
 
+    async def update_attendance_times(
+        self,
+        *,
+        guild_id: str,
+        attendance_start: str,
+        late_deadline: str,
+        close_deadline: str,
+        now: str,
+    ) -> bool:
+        """Update attendance time settings for a configured guild."""
+
+        connection = await self.database.connect()
+
+        try:
+            cursor = await connection.execute(
+                """
+                UPDATE guild_settings
+                SET
+                    attendance_start = ?,
+                    late_deadline = ?,
+                    close_deadline = ?,
+                    updated_at = ?
+                WHERE guild_id = ?;
+                """,
+                (
+                    attendance_start,
+                    late_deadline,
+                    close_deadline,
+                    now,
+                    guild_id,
+                ),
+            )
+            await connection.commit()
+            return cursor.rowcount > 0
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
+    async def update_session_window_if_unrecorded(
+        self,
+        *,
+        guild_id: str,
+        attendance_date: str,
+        start_at: str,
+        late_at: str,
+        close_at: str,
+        status: str,
+        opened_at: str | None,
+        now: str,
+    ) -> str:
+        """Update today's open/scheduled session window when no records exist."""
+
+        connection = await self.database.connect()
+
+        try:
+            session_rows = await connection.execute_fetchall(
+                """
+                SELECT id, status
+                FROM attendance_sessions
+                WHERE guild_id = ? AND attendance_date = ?;
+                """,
+                (guild_id, attendance_date),
+            )
+            if not session_rows:
+                return "NO_SESSION"
+
+            session = session_rows[0]
+            if session["status"] not in {"SCHEDULED", "OPEN"}:
+                return "SESSION_LOCKED"
+
+            record_rows = await connection.execute_fetchall(
+                """
+                SELECT 1
+                FROM attendance_records
+                WHERE session_id = ?
+                LIMIT 1;
+                """,
+                (session["id"],),
+            )
+            if record_rows:
+                return "HAS_RECORDS"
+
+            await connection.execute(
+                """
+                UPDATE attendance_sessions
+                SET
+                    start_at = ?,
+                    late_at = ?,
+                    close_at = ?,
+                    status = ?,
+                    opened_at = ?,
+                    start_announced_at = NULL,
+                    close_announced_at = NULL,
+                    updated_at = ?
+                WHERE id = ?;
+                """,
+                (
+                    start_at,
+                    late_at,
+                    close_at,
+                    status,
+                    opened_at,
+                    now,
+                    session["id"],
+                ),
+            )
+            await connection.commit()
+            return "UPDATED"
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
     async def list_all_settings(self) -> list[dict[str, Any]]:
         """설정이 완료된 모든 서버 설정을 조회한다.
 

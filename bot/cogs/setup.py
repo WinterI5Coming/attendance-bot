@@ -1,5 +1,6 @@
 """Discord 서버의 최초 설정 명령어를 제공한다."""
 
+from datetime import datetime, timezone
 import logging
 
 import discord
@@ -71,6 +72,8 @@ class SetupCog(commands.Cog):
             )
             return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
         try:
             result = await self.guild_service.initialize_guild(
                 guild_id=guild.id,
@@ -84,7 +87,7 @@ class SetupCog(commands.Cog):
                 guild.id,
             )
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "초기설정 중 DB 오류가 발생했습니다. "
                 "서버 로그를 확인해주세요.",
                 ephemeral=True,
@@ -92,7 +95,7 @@ class SetupCog(commands.Cog):
             return
 
         if not result.created:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "이미 초기설정이 완료된 서버입니다.",
                 ephemeral=True,
             )
@@ -147,7 +150,103 @@ class SetupCog(commands.Cog):
             inline=False,
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=embed,
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="출석시간설정",
+        description="출석 시작, 지각 기준, 마감 시간을 변경합니다.",
+    )
+    @app_commands.guild_only()
+    @app_commands.rename(
+        attendance_start="출석시작",
+        late_deadline="지각기준",
+        close_deadline="마감시간",
+    )
+    @app_commands.describe(
+        attendance_start="HH:MM 형식, 예: 21:30",
+        late_deadline="HH:MM 형식, 예: 21:40",
+        close_deadline="HH:MM 형식, 예: 21:45",
+    )
+    async def update_attendance_time(
+        self,
+        interaction: discord.Interaction,
+        attendance_start: str,
+        late_deadline: str,
+        close_deadline: str,
+    ) -> None:
+        """Handle the /출석시간설정 command."""
+
+        if not is_server_admin(interaction):
+            await interaction.response.send_message(
+                "서버 소유자 또는 관리자만 출석 시간을 변경할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            result = await self.guild_service.update_attendance_times(
+                guild_id=guild.id,
+                attendance_start=attendance_start,
+                late_deadline=late_deadline,
+                close_deadline=close_deadline,
+                now=datetime.now(timezone.utc),
+            )
+        except Exception:
+            logger.exception(
+                "출석 시간 변경 중 오류가 발생했습니다. guild_id=%s",
+                guild.id,
+            )
+            await interaction.followup.send(
+                "출석 시간 변경 중 오류가 발생했습니다. 서버 로그를 확인해주세요.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            self._build_time_update_message(result),
+            ephemeral=True,
+        )
+
+    def _build_time_update_message(self, result) -> str:
+        """Build the attendance time update response."""
+
+        if result.status == "NOT_CONFIGURED":
+            return "아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
+
+        if result.status == "INVALID_TIME":
+            return "시간은 HH:MM 형식으로 입력해주세요. 예: 21:30"
+
+        if result.status == "INVALID_ORDER":
+            return "시간은 출석시작 < 지각기준 < 마감시간 순서여야 합니다."
+
+        session_messages = {
+            "UPDATED": "오늘 생성된 출석 세션도 함께 갱신했습니다.",
+            "NO_SESSION": "오늘 생성된 출석 세션은 아직 없어 다음 생성부터 적용됩니다.",
+            "HAS_RECORDS": "오늘 세션에는 이미 출석 기록이 있어 기존 세션 시간은 변경하지 않았습니다.",
+            "SESSION_LOCKED": "오늘 세션은 이미 마감/취소되어 기존 세션 시간은 변경하지 않았습니다.",
+        }
+        session_message = session_messages.get(
+            result.today_session_status,
+            "오늘 세션 상태는 변경하지 않았습니다.",
+        )
+
+        return (
+            "출석 시간이 변경되었습니다.\n"
+            f"정상 출석: {result.attendance_start} ~ {result.late_deadline}\n"
+            f"지각: {result.late_deadline} ~ {result.close_deadline}\n"
+            f"마감: {result.close_deadline}\n"
+            f"{session_message}"
         )
