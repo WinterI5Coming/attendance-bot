@@ -1,5 +1,7 @@
 """Discord 서버의 최초 설정 규칙을 담당한다."""
 
+from typing import Any
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -83,4 +85,22 @@ class GuildService:
             late_deadline=self.settings.default_late_deadline,
             close_deadline=self.settings.default_close_deadline,
             excuse_mode=self.settings.default_excuse_mode,
+        )
+        
+    async def get_settings(
+        self,
+        guild_id: int,
+    ) -> dict[str, Any] | None:
+        """Discord 서버의 근태 설정을 조회한다.
+
+        Args:
+            guild_id:
+                조회할 Discord 서버 ID.
+
+        Returns:
+            설정이 존재하면 딕셔너리, 없으면 None.
+        """
+
+        return await self.repository.get_by_guild_id(
+            str(guild_id)
         )

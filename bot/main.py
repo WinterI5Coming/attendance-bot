@@ -5,11 +5,14 @@ import logging
 import discord
 from discord.ext import commands
 
+from bot.cogs.members import MembersCog
 from bot.cogs.setup import SetupCog
 from bot.config import load_settings
 from bot.db.database import Database
 from bot.repositories.guild_repository import GuildRepository
+from bot.repositories.member_repository import MemberRepository
 from bot.services.guild_service import GuildService
+from bot.services.member_service import MemberService
 
 
 # .env 파일의 환경변수를 읽는다.
@@ -51,6 +54,18 @@ guild_service = GuildService(
 )
 
 
+# Repository는 DB에 직접 접근한다.
+member_repository = MemberRepository(
+    database=database,
+)
+
+
+# Service는 대원 등록/제외/조회 관련 규칙을 처리한다.
+member_service = MemberService(
+    repository=member_repository,
+)
+
+
 class AttendanceBot(commands.Bot):
     """근태관리봇 Discord 클라이언트."""
 
@@ -79,6 +94,14 @@ class AttendanceBot(commands.Bot):
         await self.add_cog(
             SetupCog(
                 guild_service=guild_service,
+            )
+        )
+
+        # 2-1. 대원 등록/제외/조회 명령어가 들어 있는 Cog를 봇에 등록한다.
+        await self.add_cog(
+            MembersCog(
+                guild_service=guild_service,
+                member_service=member_service,
             )
         )
 
