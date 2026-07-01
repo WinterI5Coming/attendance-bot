@@ -115,6 +115,7 @@ async def test_attendance_tables_exist_after_migration(migrated_database):
             "score_events",
             "audit_logs",
             "excuse_requests",
+            "evaluations",
         }.issubset(table_names)
 
         migration_rows = await connection.execute_fetchall(
@@ -124,7 +125,7 @@ async def test_attendance_tables_exist_after_migration(migrated_database):
             ORDER BY version;
             """
         )
-        assert [row["version"] for row in migration_rows] == [1, 2, 3]
+        assert [row["version"] for row in migration_rows] == [1, 2, 3, 4]
     finally:
         await connection.close()
 

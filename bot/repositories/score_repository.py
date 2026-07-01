@@ -250,6 +250,103 @@ class ScoreRepository:
         assert cursor.lastrowid is not None
         return cursor.lastrowid
 
+    async def create_reversal_event(
+        self,
+        *,
+        guild_id: str,
+        member_id: int,
+        event_type: str,
+        delta: int,
+        reference_type: str | None,
+        reference_id: int | None,
+        dedup_key: str,
+        description: str,
+        created_by_discord_id: str | None,
+        created_at: str,
+        reversed_event_id: int,
+        connection: aiosqlite.Connection,
+    ) -> int:
+        """Create a score event that explicitly reverses another event.
+
+        Score rows are append-only, so cancellation never deletes or edits the
+        original points. A reversal keeps totals correct while preserving the
+        historical reason for the original score.
+        """
+
+        cursor = await connection.execute(
+            """
+            INSERT INTO score_events (
+                guild_id,
+                member_id,
+                event_type,
+                delta,
+                reference_type,
+                reference_id,
+                dedup_key,
+                description,
+                created_by_discord_id,
+                created_at,
+                reversed_event_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                guild_id,
+                member_id,
+                event_type,
+                delta,
+                reference_type,
+                reference_id,
+                dedup_key,
+                description,
+                created_by_discord_id,
+                created_at,
+                reversed_event_id,
+            ),
+        )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    async def get_by_id(
+        self,
+        *,
+        score_event_id: int,
+        connection: aiosqlite.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch one score ledger row by ID."""
+
+        owns_connection = connection is None
+        if connection is None:
+            connection = await self.database.connect()
+
+        try:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    id,
+                    guild_id,
+                    member_id,
+                    event_type,
+                    delta,
+                    reference_type,
+                    reference_id,
+                    dedup_key,
+                    description,
+                    created_by_discord_id,
+                    created_at,
+                    reversed_event_id
+                FROM score_events
+                WHERE id = ?;
+                """,
+                (score_event_id,),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            return None if row is None else dict(row)
+        finally:
+            if owns_connection:
+                await connection.close()
+
     async def list_recent_events(
         self,
         *,
