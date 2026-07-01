@@ -104,3 +104,12 @@ class GuildService:
         return await self.repository.get_by_guild_id(
             str(guild_id)
         )
+
+    async def list_all_settings(self) -> list[dict[str, Any]]:
+        """자동 출석 작업이 순회할 모든 서버 설정을 조회한다.
+
+        Returns:
+            guild_settings 행 목록.
+        """
+
+        return await self.repository.list_all_settings()
