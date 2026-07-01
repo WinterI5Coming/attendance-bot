@@ -8,6 +8,7 @@
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/backups/
 
 # Python
 __pycache__/
@@ -15,6 +16,7 @@ __pycache__/
 
 # 테스트
 .pytest_cache/
+.tmp*/
 
 # IDE
 .vscode/

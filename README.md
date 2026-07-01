@@ -332,3 +332,51 @@ venv\Scripts\python.exe -m pytest
 - 출석 시작 시 announcement 채널에 시작 공지가 한 번만 올라오는지 확인한다.
 - 출석 마감 시 마감 공지가 한 번만 올라오는지 확인한다.
 - `attendance_sessions.start_announced_at`과 `close_announced_at`이 기록되는지 확인한다.
+## Phase 3 Manual Verification Checklist
+
+### Evaluation And Cancellation
+
+- Run `/평가` as an officer and apply a positive or negative score.
+- Confirm `score_events` has an `EVALUATION` row and `evaluations.score_event_id` points to it.
+- Confirm `audit_logs` has `EVALUATION_CREATED`.
+- Run `/평가취소` and confirm an `EVALUATION_REVERSAL` row is appended.
+- Confirm the original score event is not deleted or edited.
+- Re-run cancellation for the same evaluation and confirm no duplicate reversal is created.
+
+### Manual Score And Reports
+
+- Run `/점수조정` with a nonzero delta.
+- Confirm `score_events` has a `MANUAL_ADJUSTMENT` row and `audit_logs` has `SCORE_ADJUSTED`.
+- Run `/리포트` and confirm score, rank, attendance rate, current streak, recent score events, and recent active evaluations are shown.
+- Confirm excuse request text, audit JSON, cancellation reasons, secrets, and stack traces are not shown in public reports.
+
+### Weekly Report
+
+- Prepare multiple attendance sessions plus evaluation and manual score events.
+- Run `/주간보고` and compare the result with DB rows for the guild-local Monday-to-Sunday range.
+- Confirm `CANCELLED` sessions are excluded from attendance-rate denominators.
+- Confirm weekly score deltas include attendance, correction, streak, evaluation, and manual adjustment events.
+
+### Settings
+
+- Run `/설정조회` and confirm timezone, attendance days, times, role, channel IDs, and excuse mode.
+- Run `/설정변경` for time fields and confirm `start < late < close` validation.
+- Run `/설정변경` for days, timezone, excuse mode, role ID, and channel IDs.
+- Confirm `audit_logs` has `GUILD_SETTINGS_UPDATED`.
+- Confirm already-created attendance records are not changed by settings updates.
+
+### Today Session Cancel And Resume
+
+- With today's session in `SCHEDULED` or `OPEN`, run `/오늘출석취소`.
+- Confirm the session becomes `CANCELLED` and existing attendance records remain.
+- Confirm attendance score events are compensated by `SESSION_CANCEL_REVERSAL` events.
+- Confirm reports exclude the cancelled session from attendance-rate calculations.
+- Run `/오늘출석재개` and confirm the session returns to `SCHEDULED` or `OPEN`.
+- Confirm cancelled points are restored by `SESSION_RESUME_RESTORE` events.
+
+### SQLite Backup
+
+- Confirm the backup scheduler creates `data/backups/attendance-YYYYMMDD-HHMMSS.db`.
+- Run `PRAGMA integrity_check` against the backup and confirm `ok`.
+- Confirm WAL-mode recent data is included in the backup.
+- Confirm retention pruning removes only old `attendance-*.db` backup files, never the live DB.
