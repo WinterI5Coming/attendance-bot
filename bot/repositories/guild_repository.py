@@ -157,3 +157,39 @@ class GuildRepository:
 
         finally:
             await connection.close()
+
+    async def list_all_settings(self) -> list[dict[str, Any]]:
+        """설정이 완료된 모든 서버 설정을 조회한다.
+
+        Returns:
+            자동 스케줄러가 순회할 guild_settings 행 목록.
+        """
+
+        connection = await self.database.connect()
+
+        try:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    guild_id,
+                    timezone,
+                    attendance_days,
+                    attendance_start,
+                    late_deadline,
+                    close_deadline,
+                    excuse_mode,
+                    officer_role_id,
+                    attendance_channel_id,
+                    announcement_channel_id,
+                    weekly_report_enabled,
+                    created_at,
+                    updated_at
+                FROM guild_settings
+                ORDER BY guild_id;
+                """
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            return [dict(row) for row in rows]
+        finally:
+            await connection.close()

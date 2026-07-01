@@ -292,3 +292,42 @@ class MemberRepository:
             return [dict(row) for row in rows]
         finally:
             await connection.close()
+
+    async def list_active_with_ids(
+        self,
+        *,
+        guild_id: str,
+    ) -> list[dict[str, Any]]:
+        """현재 서버의 활성 대원을 내부 member id와 함께 조회한다.
+
+        Args:
+            guild_id:
+                Discord 서버 ID.
+
+        Returns:
+            세션 참여자 스냅샷 생성에 사용할 활성 대원 목록. 각 행에는
+            ``id``, ``discord_id``, ``display_name``이 포함된다.
+        """
+
+        connection = await self.database.connect()
+
+        try:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    id,
+                    discord_id,
+                    display_name
+                FROM members
+                WHERE guild_id = ? AND is_active = 1
+                ORDER BY display_name COLLATE NOCASE;
+                """,
+                (guild_id,),
+            )
+
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+            return [dict(row) for row in rows]
+        finally:
+            await connection.close()
