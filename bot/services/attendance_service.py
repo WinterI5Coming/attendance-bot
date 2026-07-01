@@ -10,14 +10,17 @@ import uuid
 
 import aiosqlite
 
+from bot.policies.rank_policy import get_rank
 from bot.policies.score_policy import get_attendance_score
 from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.attendance_repository import AttendanceRepository
+from bot.repositories.excuse_repository import ExcuseRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
 from bot.services.session_service import SessionPrepareStatus, SessionService
+from bot.services.streak_service import StreakService
 from bot.utils.time_utils import get_server_today
 
 
@@ -113,6 +116,7 @@ class AttendanceCheckInStatus(Enum):
 
     PRESENT = "PRESENT"
     LATE = "LATE"
+    EXCUSED_LATE = "EXCUSED_LATE"
     ALREADY_CHECKED = "ALREADY_CHECKED"
     NOT_OPEN = "NOT_OPEN"
     CLOSED = "CLOSED"
@@ -160,6 +164,11 @@ class AttendanceCheckInResult:
     attendance_status: str | None = None
     score_delta: int | None = None
     total_score: int | None = None
+    current_streak: int | None = None
+    streak_bonus_delta: int = 0
+    previous_rank: str | None = None
+    current_rank: str | None = None
+    rank_changed: bool = False
     checked_at: str | None = None
     start_at: str | None = None
     late_at: str | None = None
@@ -256,6 +265,8 @@ class AttendanceService:
         session_service: SessionService,
         guild_repository: GuildRepository | None = None,
         audit_repository: AuditRepository | None = None,
+        excuse_repository: ExcuseRepository | None = None,
+        streak_service: StreakService | None = None,
     ) -> None:
         """Create the service.
 
@@ -276,6 +287,8 @@ class AttendanceService:
         self.session_service = session_service
         self.guild_repository = guild_repository
         self.audit_repository = audit_repository
+        self.excuse_repository = excuse_repository
+        self.streak_service = streak_service
 
     async def check_in(
         self,
@@ -389,11 +402,24 @@ class AttendanceService:
             )
 
         attendance_status = time_result.value
+        excuse_request_id: int | None = None
+        if self.excuse_repository is not None:
+            excuse_request = await self.excuse_repository.get_effective_approved_request(
+                guild_id=guild_id_text,
+                member_id=int(member["id"]),
+                target_date=session["attendance_date"],
+            )
+            if excuse_request is not None:
+                excuse_request_id = int(excuse_request["id"])
+                if attendance_status == "LATE":
+                    attendance_status = "EXCUSED_LATE"
+
         return await self._create_record_and_score(
             guild_id=guild_id_text,
             session=session,
             member_id=int(member["id"]),
             attendance_status=attendance_status,
+            excuse_request_id=excuse_request_id,
             checked_at=now.isoformat(),
             timezone_name=prepared.timezone_name,
         )
@@ -604,6 +630,7 @@ class AttendanceService:
         session: dict[str, Any],
         member_id: int,
         attendance_status: str,
+        excuse_request_id: int | None,
         checked_at: str,
         timezone_name: str | None,
     ) -> AttendanceCheckInResult:
@@ -651,6 +678,12 @@ class AttendanceService:
                     timezone_name=timezone_name,
                 )
 
+            previous_total = await self.score_repository.get_total_score(
+                member_id=member_id,
+                connection=connection,
+            )
+            previous_rank = get_rank(previous_total)
+
             record = await self.attendance_repository.create_user_record(
                 session_id=int(session["id"]),
                 member_id=member_id,
@@ -658,8 +691,25 @@ class AttendanceService:
                 checked_at=checked_at,
                 connection=connection,
             )
+            if excuse_request_id is not None:
+                await self.attendance_repository.set_excuse_request(
+                    attendance_record_id=int(record["id"]),
+                    excuse_request_id=excuse_request_id,
+                    connection=connection,
+                )
+                record = await self.attendance_repository.get_by_session_and_member(
+                    session_id=int(session["id"]),
+                    member_id=member_id,
+                    connection=connection,
+                )
+                assert record is not None
             score_delta = get_attendance_score(attendance_status)
-            description = "정상 출석" if attendance_status == "PRESENT" else "지각"
+            descriptions = {
+                "PRESENT": "정상 출석",
+                "LATE": "지각",
+                "EXCUSED_LATE": "사유 지각",
+            }
+            description = descriptions[attendance_status]
 
             # Attendance and score must be atomic: the command should never
             # leave a checked-in member without points, or points without the
@@ -674,10 +724,24 @@ class AttendanceService:
                 created_at=checked_at,
                 connection=connection,
             )
+            streak_result = None
+            if self.streak_service is not None and attendance_status in {
+                "PRESENT",
+                "LATE",
+                "EXCUSED_LATE",
+            }:
+                streak_result = await self.streak_service.apply_bonus_if_needed(
+                    guild_id=guild_id,
+                    member_id=member_id,
+                    session_id=int(session["id"]),
+                    created_at=checked_at,
+                    connection=connection,
+                )
             total_score = await self.score_repository.get_total_score(
                 member_id=member_id,
                 connection=connection,
             )
+            current_rank = get_rank(total_score)
             await connection.commit()
 
             return AttendanceCheckInResult(
@@ -685,6 +749,15 @@ class AttendanceService:
                 attendance_status=attendance_status,
                 score_delta=score_delta,
                 total_score=total_score,
+                current_streak=(
+                    None if streak_result is None else streak_result.current_streak
+                ),
+                streak_bonus_delta=(
+                    0 if streak_result is None else streak_result.bonus_delta
+                ),
+                previous_rank=previous_rank,
+                current_rank=current_rank,
+                rank_changed=previous_rank != current_rank,
                 checked_at=checked_at,
                 start_at=session["start_at"],
                 late_at=session["late_at"],

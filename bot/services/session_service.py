@@ -10,6 +10,7 @@ import aiosqlite
 
 from bot.policies.score_policy import get_attendance_score
 from bot.repositories.attendance_repository import AttendanceRepository
+from bot.repositories.excuse_repository import ExcuseRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.score_repository import ScoreRepository
@@ -108,6 +109,7 @@ class SessionService:
         session_repository: SessionRepository,
         attendance_repository: AttendanceRepository | None = None,
         score_repository: ScoreRepository | None = None,
+        excuse_repository: ExcuseRepository | None = None,
     ) -> None:
         """Create the service.
 
@@ -126,6 +128,7 @@ class SessionService:
         self.session_repository = session_repository
         self.attendance_repository = attendance_repository
         self.score_repository = score_repository
+        self.excuse_repository = excuse_repository
 
     async def prepare_today_session(
         self,
@@ -323,25 +326,41 @@ class SessionService:
                 (session_id,),
             )
             already_recorded_count = int(all_members[0]["count"]) - len(unchecked_members)
-            absent_score = get_attendance_score("ABSENT")
-
             # The whole close runs in one transaction so a session cannot be
             # half closed: every ABSENT record, its -3 ledger event, and the
             # CLOSED status are committed or rolled back together.
             for member in unchecked_members:
+                attendance_status = "ABSENT"
+                excuse_request_id = None
+                if self.excuse_repository is not None:
+                    excuse_request = await self.excuse_repository.get_effective_approved_request(
+                        guild_id=session["guild_id"],
+                        member_id=int(member["member_id"]),
+                        target_date=session["attendance_date"],
+                        connection=connection,
+                    )
+                    if excuse_request is not None:
+                        attendance_status = "EXCUSED_ABSENT"
+                        excuse_request_id = int(excuse_request["id"])
+
                 record = await self.attendance_repository.create_auto_absent_record(
                     session_id=session_id,
                     member_id=int(member["member_id"]),
+                    status=attendance_status,
+                    excuse_request_id=excuse_request_id,
                     now=now_text,
                     connection=connection,
                 )
+                score_delta = get_attendance_score(attendance_status)
                 await self.score_repository.create_attendance_event(
                     guild_id=session["guild_id"],
                     member_id=int(member["member_id"]),
                     attendance_record_id=int(record["id"]),
-                    attendance_status="ABSENT",
-                    delta=absent_score,
-                    description="결석",
+                    attendance_status=attendance_status,
+                    delta=score_delta,
+                    description=(
+                        "사유 결석" if attendance_status == "EXCUSED_ABSENT" else "결석"
+                    ),
                     created_at=now_text,
                     connection=connection,
                 )
