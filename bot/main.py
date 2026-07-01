@@ -1,18 +1,30 @@
 """디스코드 근태관리봇의 실행 진입점."""
 
 import logging
+from datetime import datetime, timezone
 
 import discord
 from discord.ext import commands
 
+from bot.cogs.attendance import AttendanceCog
 from bot.cogs.members import MembersCog
+from bot.cogs.reports import ReportsCog
 from bot.cogs.setup import SetupCog
 from bot.config import load_settings
 from bot.db.database import Database
+from bot.repositories.audit_repository import AuditRepository
+from bot.repositories.attendance_repository import AttendanceRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
+from bot.repositories.report_repository import ReportRepository
+from bot.repositories.score_repository import ScoreRepository
+from bot.repositories.session_repository import SessionRepository
+from bot.scheduler.attendance_loop import AttendanceScheduler
+from bot.services.attendance_service import AttendanceService
 from bot.services.guild_service import GuildService
 from bot.services.member_service import MemberService
+from bot.services.report_service import ReportService
+from bot.services.session_service import SessionService
 
 
 # .env 파일의 환경변수를 읽는다.
@@ -66,6 +78,65 @@ member_service = MemberService(
 )
 
 
+session_repository = SessionRepository(
+    database=database,
+)
+
+
+attendance_repository = AttendanceRepository(
+    database=database,
+)
+
+
+score_repository = ScoreRepository(
+    database=database,
+)
+
+
+audit_repository = AuditRepository(
+    database=database,
+)
+
+
+report_repository = ReportRepository(
+    database=database,
+)
+
+
+session_service = SessionService(
+    guild_repository=guild_repository,
+    member_repository=member_repository,
+    session_repository=session_repository,
+    attendance_repository=attendance_repository,
+    score_repository=score_repository,
+)
+
+
+attendance_service = AttendanceService(
+    member_repository=member_repository,
+    session_repository=session_repository,
+    attendance_repository=attendance_repository,
+    score_repository=score_repository,
+    session_service=session_service,
+    guild_repository=guild_repository,
+    audit_repository=audit_repository,
+)
+
+
+report_service = ReportService(
+    guild_repository=guild_repository,
+    member_repository=member_repository,
+    report_repository=report_repository,
+    score_repository=score_repository,
+)
+
+
+attendance_scheduler = AttendanceScheduler(
+    guild_service=guild_service,
+    session_service=session_service,
+)
+
+
 class AttendanceBot(commands.Bot):
     """근태관리봇 Discord 클라이언트."""
 
@@ -105,6 +176,20 @@ class AttendanceBot(commands.Bot):
             )
         )
 
+        # 2-2. 출석/출석현황 명령어가 들어 있는 Cog를 봇에 등록한다.
+        await self.add_cog(
+            AttendanceCog(
+                attendance_service=attendance_service,
+                guild_service=guild_service,
+            )
+        )
+
+        await self.add_cog(
+            ReportsCog(
+                report_service=report_service,
+            )
+        )
+
         # 3. 개발 서버에 슬래시 명령어를 동기화한다.
         development_guild = discord.Object(
             id=settings.development_guild_id,
@@ -122,6 +207,11 @@ class AttendanceBot(commands.Bot):
             "개발 서버에 슬래시 명령어 %d개를 동기화했습니다.",
             len(synced_commands),
         )
+
+        await attendance_scheduler.recover_overdue_sessions(
+            datetime.now(timezone.utc)
+        )
+        attendance_scheduler.start()
 
 
 bot = AttendanceBot()
