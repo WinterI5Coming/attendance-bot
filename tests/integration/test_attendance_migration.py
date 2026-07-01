@@ -114,6 +114,7 @@ async def test_attendance_tables_exist_after_migration(migrated_database):
             "attendance_records",
             "score_events",
             "audit_logs",
+            "excuse_requests",
         }.issubset(table_names)
 
         migration_rows = await connection.execute_fetchall(
@@ -123,7 +124,7 @@ async def test_attendance_tables_exist_after_migration(migrated_database):
             ORDER BY version;
             """
         )
-        assert [row["version"] for row in migration_rows] == [1, 2]
+        assert [row["version"] for row in migration_rows] == [1, 2, 3]
     finally:
         await connection.close()
 
@@ -335,6 +336,61 @@ async def test_attendance_migration_constraints(migrated_database):
                 VALUES (?, 999999, ?);
                 """,
                 (session_id, NOW),
+            )
+
+        await connection.rollback()
+
+        await connection.execute(
+            """
+            INSERT INTO excuse_requests (
+                guild_id,
+                member_id,
+                target_date,
+                reason,
+                expected_time,
+                status,
+                requested_at
+            )
+            VALUES (?, ?, '2026-07-03', 'Family schedule', '21:35',
+                'PENDING', ?);
+            """,
+            (GUILD_ID, member_id, NOW),
+        )
+        await connection.commit()
+
+        with pytest.raises(aiosqlite.IntegrityError):
+            await connection.execute(
+                """
+                INSERT INTO excuse_requests (
+                    guild_id,
+                    member_id,
+                    target_date,
+                    reason,
+                    status,
+                    requested_at
+                )
+                VALUES (?, ?, '2026-07-03', 'Duplicate active request',
+                    'APPROVED', ?);
+                """,
+                (GUILD_ID, member_id, NOW),
+            )
+
+        await connection.rollback()
+
+        with pytest.raises(aiosqlite.IntegrityError):
+            await connection.execute(
+                """
+                INSERT INTO excuse_requests (
+                    guild_id,
+                    member_id,
+                    target_date,
+                    reason,
+                    status,
+                    requested_at
+                )
+                VALUES (?, ?, '2026-07-04', 'Broken status', 'BROKEN', ?);
+                """,
+                (GUILD_ID, member_id, NOW),
             )
     finally:
         await connection.close()
