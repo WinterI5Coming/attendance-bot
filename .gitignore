@@ -1,0 +1,21 @@
+# 환경변수
+.env
+
+# 가상환경
+.venv/
+
+# SQLite
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+
+# 테스트
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
