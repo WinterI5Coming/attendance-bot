@@ -290,7 +290,7 @@ async def ping(
     )
 
     await interaction.response.send_message(
-        f"정상 작동 중입니다. 응답 속도: {latency_ms}ms",
+        f"🏓 정상 작동 중입니다. 응답 속도: {latency_ms}ms",
         ephemeral=True,
     )
 

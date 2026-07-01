@@ -37,7 +37,7 @@ class ReportsCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return
@@ -54,7 +54,7 @@ class ReportsCog(commands.Cog):
                 interaction.user.id,
             )
             await interaction.response.send_message(
-                "내정보 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 내정보 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
@@ -75,7 +75,7 @@ class ReportsCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return
@@ -85,7 +85,7 @@ class ReportsCog(commands.Cog):
         except Exception:
             logger.exception("랭킹 조회 중 오류가 발생했습니다. guild_id=%s", guild.id)
             await interaction.response.send_message(
-                "랭킹 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 랭킹 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
@@ -99,7 +99,7 @@ class ReportsCog(commands.Cog):
         """Build the personal report message."""
 
         if not result.found:
-            return "출석 대원으로 등록되어 있지 않습니다."
+            return "🚫 출석 대원으로 등록되어 있지 않습니다."
 
         recent_lines = []
         for event in result.recent_events or []:
@@ -115,18 +115,18 @@ class ReportsCog(commands.Cog):
             recent_lines.append("- 최근 점수 변화가 없습니다.")
 
         return (
-            f"내정보: {result.display_name}\n\n"
-            f"총점: {result.total_score}점\n"
-            f"현재 계급: {result.rank}\n"
-            f"참여 대상 세션: {result.total_sessions}회\n"
-            f"정상 출석: {result.present_count}회\n"
-            f"지각: {result.late_count}회\n"
-            f"결석: {result.absent_count}회\n"
-            f"사유 지각: {result.excused_late_count}회\n"
-            f"사유 결석: {result.excused_absent_count}회\n"
-            f"출석률: {result.attendance_rate:.1f}%\n"
-            f"연속 출석: {result.current_streak}회\n\n"
-            "최근 점수 변화\n"
+            f"📊 내정보: {result.display_name}\n\n"
+            f"💯 총점: {result.total_score}점\n"
+            f"🏅 현재 계급: {result.rank}\n"
+            f"🗓️ 참여 대상 세션: {result.total_sessions}회\n"
+            f"✅ 정상 출석: {result.present_count}회\n"
+            f"⏰ 지각: {result.late_count}회\n"
+            f"❌ 결석: {result.absent_count}회\n"
+            f"📋 사유 지각: {result.excused_late_count}회\n"
+            f"🛡️ 사유 결석: {result.excused_absent_count}회\n"
+            f"📈 출석률: {result.attendance_rate:.1f}%\n"
+            f"🔥 연속 출석: {result.current_streak}회\n\n"
+            "🕒 최근 점수 변화\n"
             + "\n".join(recent_lines)
         )
 
@@ -134,16 +134,19 @@ class ReportsCog(commands.Cog):
         """Build the ranking response."""
 
         if not result.configured:
-            return "아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
+            return "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
 
         entries = result.entries or []
         if not entries:
-            return "랭킹에 표시할 활성 대원이 없습니다."
+            return "🏆 랭킹에 표시할 활성 대원이 없습니다."
 
-        lines = ["출석 랭킹"]
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+        lines = ["🏆 출석 랭킹\n"]
         for entry in entries:
+            marker = medals.get(entry.rank_no, f"{entry.rank_no}.")
             lines.append(
-                f"{entry.rank_no}. <@{entry.discord_id}> "
-                f"{entry.total_score}점 / {entry.rank} / 연속 {entry.current_streak}회"
+                f"{marker} <@{entry.discord_id}> "
+                f"💯 {entry.total_score}점 / 🏅 {entry.rank} / 🔥 연속 {entry.current_streak}회"
             )
         return "\n".join(lines)

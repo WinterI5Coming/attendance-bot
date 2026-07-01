@@ -185,17 +185,17 @@ class AttendanceScheduler:
     def _build_start_message(self, session: dict[str, Any]) -> str:
         timezone_name = session["timezone"]
         return (
-            "출석이 시작되었습니다.\n"
-            f"정상 출석 마감: {format_local_hhmm(datetime.fromisoformat(session['late_at']), timezone_name)}\n"
-            f"전체 마감: {format_local_hhmm(datetime.fromisoformat(session['close_at']), timezone_name)}\n"
-            "지금 /출석 명령어로 체크인해주세요."
+            "🚀 출석이 시작되었습니다.\n"
+            f"⏰ 정상 출석 마감: {format_local_hhmm(datetime.fromisoformat(session['late_at']), timezone_name)}\n"
+            f"🔒 전체 마감: {format_local_hhmm(datetime.fromisoformat(session['close_at']), timezone_name)}\n"
+            "✅ 지금 /출석 명령어로 체크인해주세요."
         )
 
     def _build_close_message(self, session: dict[str, Any]) -> str:
         timezone_name = session["timezone"]
         closed_at = session["closed_at"] or session["close_at"]
         return (
-            "출석이 마감되었습니다.\n"
-            f"마감 시각: {format_local_hhmm(datetime.fromisoformat(closed_at), timezone_name)}\n"
-            "결과는 /출석현황 또는 /랭킹에서 확인할 수 있습니다."
+            "🔒 출석이 마감되었습니다.\n"
+            f"🕒 마감 시각: {format_local_hhmm(datetime.fromisoformat(closed_at), timezone_name)}\n"
+            "📊 결과는 /출석현황 또는 /랭킹에서 확인할 수 있습니다."
         )

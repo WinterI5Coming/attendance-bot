@@ -54,7 +54,7 @@ class ExcusesCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return
@@ -75,7 +75,7 @@ class ExcusesCog(commands.Cog):
                 interaction.user.id,
             )
             await interaction.response.send_message(
-                "사유 신청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 사유 신청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
@@ -101,7 +101,7 @@ class ExcusesCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return
@@ -116,7 +116,7 @@ class ExcusesCog(commands.Cog):
         except Exception:
             logger.exception("사유 취소 중 오류가 발생했습니다. guild_id=%s", guild.id)
             await interaction.response.send_message(
-                "사유 취소 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 사유 취소 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
@@ -152,7 +152,7 @@ class ExcusesCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return
@@ -169,7 +169,7 @@ class ExcusesCog(commands.Cog):
         except Exception:
             logger.exception("사유 목록 조회 중 오류가 발생했습니다. guild_id=%s", guild.id)
             await interaction.response.send_message(
-                "사유 목록 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 사유 목록 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
@@ -207,7 +207,7 @@ class ExcusesCog(commands.Cog):
         except Exception:
             logger.exception("사유 승인 중 오류가 발생했습니다. guild_id=%s", guild.id)
             await interaction.response.send_message(
-                "사유 승인 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 사유 승인 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
@@ -247,7 +247,7 @@ class ExcusesCog(commands.Cog):
         except Exception:
             logger.exception("사유 거절 중 오류가 발생했습니다. guild_id=%s", guild.id)
             await interaction.response.send_message(
-                "사유 거절 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 사유 거절 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
@@ -270,20 +270,20 @@ class ExcusesCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return False
         settings = await self.guild_service.get_settings(guild.id)
         if settings is None:
             await interaction.response.send_message(
-                "아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요.",
+                "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요.",
                 ephemeral=True,
             )
             return False
         if not has_officer_permission(interaction, settings["officer_role_id"]):
             await interaction.response.send_message(
-                "간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
+                "🚫 간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
                 ephemeral=True,
             )
             return False
@@ -296,9 +296,9 @@ class ExcusesCog(commands.Cog):
         request_id = result.request["id"]
         target_date = result.request["target_date"]
         if result.status is ExcuseStatus.CREATED_AUTO_APPROVED:
-            return f"사유 신청이 자동 승인되었습니다.\n신청번호: {request_id}\n날짜: {target_date}"
+            return f"✅ 사유 신청이 자동 승인되었습니다.\n🔖 신청번호: {request_id}\n🗓️ 날짜: {target_date}"
         if result.status is ExcuseStatus.CREATED_PENDING:
-            return f"사유 신청이 접수되었습니다.\n신청번호: {request_id}\n날짜: {target_date}"
+            return f"📝 사유 신청이 접수되었습니다.\n🔖 신청번호: {request_id}\n🗓️ 날짜: {target_date}"
         return self._message_for_status(result)
 
     def _build_list_message(self, result: ExcuseResult) -> str:
@@ -307,40 +307,49 @@ class ExcusesCog(commands.Cog):
 
         rows = [] if result.request is None else result.request.get("rows", [])
         if not rows:
-            return "조회할 사유 신청이 없습니다."
+            return "ℹ️ 조회할 사유 신청이 없습니다."
 
-        lines = ["사유 신청 목록"]
+        status_emojis = {
+            "PENDING": "⏳",
+            "APPROVED": "✅",
+            "AUTO_APPROVED": "✅",
+            "REJECTED": "❌",
+            "CANCELLED": "🚫",
+        }
+
+        lines = ["📋 사유 신청 목록\n"]
         for row in rows[:20]:
+            emoji = status_emojis.get(row["status"], "•")
             lines.append(
-                f"#{row['id']} / {row['target_date']} / {self._status_label(row['status'])} "
+                f"{emoji} #{row['id']} / 🗓️ {row['target_date']} / {self._status_label(row['status'])} "
                 f"/ <@{row['discord_id']}>"
             )
         if len(rows) > 20:
-            lines.append("일부 목록은 생략되었습니다.")
+            lines.append("… 일부 목록은 생략되었습니다.")
         return "\n".join(lines)
 
     def _message_for_status(self, result: ExcuseResult) -> str:
         messages = {
-            ExcuseStatus.DUPLICATE_ACTIVE_REQUEST: "이미 해당 날짜에 활성 사유 신청이 있습니다.",
-            ExcuseStatus.INVALID_DATE: "날짜는 YYYY-MM-DD 형식으로 입력해주세요.",
-            ExcuseStatus.PAST_DATE: "지난 날짜의 사유는 신청할 수 없습니다.",
-            ExcuseStatus.NOT_ATTENDANCE_DAY: "해당 날짜는 출석일이 아닙니다.",
-            ExcuseStatus.TOO_LATE_TO_REQUEST: "출석 시작 이후에는 사유를 신청할 수 없습니다.",
-            ExcuseStatus.INVALID_TIME: "예상시간은 HH:MM 형식으로 입력해주세요.",
-            ExcuseStatus.INVALID_REASON: "사유는 2자 이상 500자 이하로 입력해주세요.",
-            ExcuseStatus.NOT_REGISTERED: "출석 대원으로 등록되어 있지 않습니다.",
-            ExcuseStatus.NOT_SESSION_MEMBER: "해당 날짜 출석 세션의 참여 대상이 아닙니다.",
-            ExcuseStatus.NOT_FOUND: "사유 신청을 찾을 수 없습니다.",
-            ExcuseStatus.NOT_OWNER: "본인 신청만 조회하거나 취소할 수 있습니다.",
-            ExcuseStatus.INVALID_STATUS: "현재 상태에서는 처리할 수 없습니다.",
-            ExcuseStatus.CANCELLED: "사유 신청을 취소했습니다.",
-            ExcuseStatus.APPROVED: f"사유 신청을 승인했습니다. 점수 보정: {result.score_delta:+d}",
-            ExcuseStatus.REJECTED: "사유 신청을 거절했습니다.",
-            ExcuseStatus.ALREADY_DECIDED: "이미 처리된 사유 신청입니다.",
-            ExcuseStatus.ALREADY_APPLIED: "이미 출석 기록에 반영되어 취소할 수 없습니다.",
-            ExcuseStatus.NOT_CONFIGURED: "아직 초기설정이 완료되지 않았습니다.",
+            ExcuseStatus.DUPLICATE_ACTIVE_REQUEST: "⚠️ 이미 해당 날짜에 활성 사유 신청이 있습니다.",
+            ExcuseStatus.INVALID_DATE: "⚠️ 날짜는 YYYY-MM-DD 형식으로 입력해주세요.",
+            ExcuseStatus.PAST_DATE: "⚠️ 지난 날짜의 사유는 신청할 수 없습니다.",
+            ExcuseStatus.NOT_ATTENDANCE_DAY: "⚠️ 해당 날짜는 출석일이 아닙니다.",
+            ExcuseStatus.TOO_LATE_TO_REQUEST: "⚠️ 출석 시작 이후에는 사유를 신청할 수 없습니다.",
+            ExcuseStatus.INVALID_TIME: "⚠️ 예상시간은 HH:MM 형식으로 입력해주세요.",
+            ExcuseStatus.INVALID_REASON: "⚠️ 사유는 2자 이상 500자 이하로 입력해주세요.",
+            ExcuseStatus.NOT_REGISTERED: "🚫 출석 대원으로 등록되어 있지 않습니다.",
+            ExcuseStatus.NOT_SESSION_MEMBER: "🚫 해당 날짜 출석 세션의 참여 대상이 아닙니다.",
+            ExcuseStatus.NOT_FOUND: "🔍 사유 신청을 찾을 수 없습니다.",
+            ExcuseStatus.NOT_OWNER: "🚫 본인 신청만 조회하거나 취소할 수 있습니다.",
+            ExcuseStatus.INVALID_STATUS: "⚠️ 현재 상태에서는 처리할 수 없습니다.",
+            ExcuseStatus.CANCELLED: "🚫 사유 신청을 취소했습니다.",
+            ExcuseStatus.APPROVED: f"✅ 사유 신청을 승인했습니다. 🎯 점수 보정: {result.score_delta:+d}",
+            ExcuseStatus.REJECTED: "❌ 사유 신청을 거절했습니다.",
+            ExcuseStatus.ALREADY_DECIDED: "ℹ️ 이미 처리된 사유 신청입니다.",
+            ExcuseStatus.ALREADY_APPLIED: "⚠️ 이미 출석 기록에 반영되어 취소할 수 없습니다.",
+            ExcuseStatus.NOT_CONFIGURED: "⚙️ 아직 초기설정이 완료되지 않았습니다.",
         }
-        return messages.get(result.status, "요청을 처리했습니다.")
+        return messages.get(result.status, "✅ 요청을 처리했습니다.")
 
     def _status_label(self, status: str) -> str:
         labels = {

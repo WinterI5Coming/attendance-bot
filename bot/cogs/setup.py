@@ -51,7 +51,7 @@ class SetupCog(commands.Cog):
 
         if not is_server_admin(interaction):
             await interaction.response.send_message(
-                "서버 소유자 또는 관리자만 초기설정을 할 수 있습니다.",
+                "🚫 서버 소유자 또는 관리자만 초기설정을 할 수 있습니다.",
                 ephemeral=True,
             )
             return
@@ -60,14 +60,14 @@ class SetupCog(commands.Cog):
 
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return
 
         if officer_role.is_default():
             await interaction.response.send_message(
-                "@everyone 역할은 간부 역할로 사용할 수 없습니다.",
+                "⚠️ @everyone 역할은 간부 역할로 사용할 수 없습니다.",
                 ephemeral=True,
             )
             return
@@ -88,7 +88,7 @@ class SetupCog(commands.Cog):
             )
 
             await interaction.followup.send(
-                "초기설정 중 DB 오류가 발생했습니다. "
+                "❌ 초기설정 중 DB 오류가 발생했습니다. "
                 "서버 로그를 확인해주세요.",
                 ephemeral=True,
             )
@@ -96,56 +96,57 @@ class SetupCog(commands.Cog):
 
         if not result.created:
             await interaction.followup.send(
-                "이미 초기설정이 완료된 서버입니다.",
+                "ℹ️ 이미 초기설정이 완료된 서버입니다.",
                 ephemeral=True,
             )
             return
 
         embed = discord.Embed(
-            title="근태관리봇 초기설정 완료",
+            title="🎉 근태관리봇 초기설정 완료",
             description=(
-                "현재 서버의 기본 근태 설정을 저장했습니다."
+                "✅ 현재 서버의 기본 근태 설정을 저장했습니다."
             ),
+            color=discord.Color.green(),
         )
 
         embed.add_field(
-            name="간부 역할",
+            name="🧑‍💼 간부 역할",
             value=officer_role.mention,
             inline=False,
         )
 
         embed.add_field(
-            name="출석 채널",
+            name="📋 출석 채널",
             value=attendance_channel.mention,
             inline=True,
         )
 
         embed.add_field(
-            name="공지 채널",
+            name="📢 공지 채널",
             value=announcement_channel.mention,
             inline=True,
         )
 
         embed.add_field(
-            name="출석 요일",
+            name="🗓️ 출석 요일",
             value=result.attendance_days,
             inline=False,
         )
 
         embed.add_field(
-            name="출석 시간",
+            name="🕒 출석 시간",
             value=(
-                f"정상: {result.attendance_start}"
+                f"✅ 정상: {result.attendance_start}"
                 f" ~ {result.late_deadline}\n"
-                f"지각: {result.late_deadline}"
+                f"⏰ 지각: {result.late_deadline}"
                 f" ~ {result.close_deadline}\n"
-                f"마감: {result.close_deadline}"
+                f"🔒 마감: {result.close_deadline}"
             ),
             inline=False,
         )
 
         embed.add_field(
-            name="사유 승인 방식",
+            name="📝 사유 승인 방식",
             value=result.excuse_mode,
             inline=False,
         )
@@ -181,7 +182,7 @@ class SetupCog(commands.Cog):
 
         if not is_server_admin(interaction):
             await interaction.response.send_message(
-                "서버 소유자 또는 관리자만 출석 시간을 변경할 수 있습니다.",
+                "🚫 서버 소유자 또는 관리자만 출석 시간을 변경할 수 있습니다.",
                 ephemeral=True,
             )
             return
@@ -189,7 +190,7 @@ class SetupCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return
@@ -210,7 +211,7 @@ class SetupCog(commands.Cog):
                 guild.id,
             )
             await interaction.followup.send(
-                "출석 시간 변경 중 오류가 발생했습니다. 서버 로그를 확인해주세요.",
+                "❌ 출석 시간 변경 중 오류가 발생했습니다. 서버 로그를 확인해주세요.",
                 ephemeral=True,
             )
             return
@@ -224,19 +225,19 @@ class SetupCog(commands.Cog):
         """Build the attendance time update response."""
 
         if result.status == "NOT_CONFIGURED":
-            return "아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
+            return "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
 
         if result.status == "INVALID_TIME":
-            return "시간은 HH:MM 형식으로 입력해주세요. 예: 21:30"
+            return "⚠️ 시간은 HH:MM 형식으로 입력해주세요. 예: 21:30"
 
         if result.status == "INVALID_ORDER":
-            return "시간은 출석시작 < 지각기준 < 마감시간 순서여야 합니다."
+            return "⚠️ 시간은 출석시작 < 지각기준 < 마감시간 순서여야 합니다."
 
         session_messages = {
-            "UPDATED": "오늘 생성된 출석 세션도 함께 갱신했습니다.",
-            "NO_SESSION": "오늘 생성된 출석 세션은 아직 없어 다음 생성부터 적용됩니다.",
-            "HAS_RECORDS": "오늘 세션에는 이미 출석 기록이 있어 기존 세션 시간은 변경하지 않았습니다.",
-            "SESSION_LOCKED": "오늘 세션은 이미 마감/취소되어 기존 세션 시간은 변경하지 않았습니다.",
+            "UPDATED": "🔄 오늘 생성된 출석 세션도 함께 갱신했습니다.",
+            "NO_SESSION": "ℹ️ 오늘 생성된 출석 세션은 아직 없어 다음 생성부터 적용됩니다.",
+            "HAS_RECORDS": "ℹ️ 오늘 세션에는 이미 출석 기록이 있어 기존 세션 시간은 변경하지 않았습니다.",
+            "SESSION_LOCKED": "ℹ️ 오늘 세션은 이미 마감/취소되어 기존 세션 시간은 변경하지 않았습니다.",
         }
         session_message = session_messages.get(
             result.today_session_status,
@@ -244,9 +245,9 @@ class SetupCog(commands.Cog):
         )
 
         return (
-            "출석 시간이 변경되었습니다.\n"
-            f"정상 출석: {result.attendance_start} ~ {result.late_deadline}\n"
-            f"지각: {result.late_deadline} ~ {result.close_deadline}\n"
-            f"마감: {result.close_deadline}\n"
+            "✅ 출석 시간이 변경되었습니다.\n"
+            f"✅ 정상 출석: {result.attendance_start} ~ {result.late_deadline}\n"
+            f"⏰ 지각: {result.late_deadline} ~ {result.close_deadline}\n"
+            f"🔒 마감: {result.close_deadline}\n"
             f"{session_message}"
         )

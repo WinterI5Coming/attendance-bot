@@ -52,7 +52,7 @@ class MembersCog(commands.Cog):
 
         if guild is None:
             await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
                 ephemeral=True,
             )
             return None
@@ -61,7 +61,7 @@ class MembersCog(commands.Cog):
 
         if settings is None:
             await interaction.response.send_message(
-                "아직 초기설정이 완료되지 않았습니다. "
+                "⚙️ 아직 초기설정이 완료되지 않았습니다. "
                 "먼저 /초기설정을 실행해주세요.",
                 ephemeral=True,
             )
@@ -97,7 +97,7 @@ class MembersCog(commands.Cog):
             settings["officer_role_id"],
         ):
             await interaction.response.send_message(
-                "간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
+                "🚫 간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
                 ephemeral=True,
             )
             return
@@ -117,7 +117,7 @@ class MembersCog(commands.Cog):
             )
         except BotRegistrationError as exc:
             await interaction.response.send_message(
-                str(exc),
+                f"⚠️ {exc}",
                 ephemeral=True,
             )
             return
@@ -130,22 +130,22 @@ class MembersCog(commands.Cog):
                 target_member.id,
             )
             await interaction.response.send_message(
-                "대원 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 대원 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
 
         if result.outcome is MemberRegistrationOutcome.ALREADY_ACTIVE:
             message = (
-                f"{target_member.mention}님은 "
+                f"ℹ️ {target_member.mention}님은 "
                 "이미 활성 대원으로 등록되어 있습니다."
             )
         elif result.outcome is MemberRegistrationOutcome.REACTIVATED:
             message = (
-                f"{target_member.mention}님을 다시 활성 대원으로 등록했습니다."
+                f"🔄 {target_member.mention}님을 다시 활성 대원으로 등록했습니다."
             )
         else:
-            message = f"{target_member.mention}님을 출석 대원으로 등록했습니다."
+            message = f"✅ {target_member.mention}님을 출석 대원으로 등록했습니다."
 
         await interaction.response.send_message(
             message,
@@ -183,7 +183,7 @@ class MembersCog(commands.Cog):
             settings["officer_role_id"],
         ):
             await interaction.response.send_message(
-                "간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
+                "🚫 간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
                 ephemeral=True,
             )
             return
@@ -203,7 +203,7 @@ class MembersCog(commands.Cog):
             )
         except InvalidDeactivationReasonError as exc:
             await interaction.response.send_message(
-                str(exc),
+                f"⚠️ {exc}",
                 ephemeral=True,
             )
             return
@@ -216,22 +216,22 @@ class MembersCog(commands.Cog):
                 target_member.id,
             )
             await interaction.response.send_message(
-                "대원 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 대원 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
 
         if result.outcome is MemberDeactivationOutcome.NOT_FOUND:
-            message = f"{target_member.mention}님은 등록된 대원이 아닙니다."
+            message = f"⚠️ {target_member.mention}님은 등록된 대원이 아닙니다."
         elif result.outcome is MemberDeactivationOutcome.ALREADY_INACTIVE:
             message = (
-                f"{target_member.mention}님은 "
+                f"ℹ️ {target_member.mention}님은 "
                 "이미 출석 대상에서 제외되어 있습니다."
             )
         else:
             message = (
-                f"{target_member.mention}님을 이후 출석 대상에서 제외했습니다.\n"
-                f"사유: {reason.strip()}"
+                f"👋 {target_member.mention}님을 이후 출석 대상에서 제외했습니다.\n"
+                f"📝 사유: {reason.strip()}"
             )
 
         await interaction.response.send_message(
@@ -269,14 +269,14 @@ class MembersCog(commands.Cog):
                 guild.id,
             )
             await interaction.response.send_message(
-                "대원 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                "❌ 대원 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
                 ephemeral=True,
             )
             return
 
         if not members:
             await interaction.response.send_message(
-                "현재 등록된 활성 대원이 없습니다.",
+                "ℹ️ 현재 등록된 활성 대원이 없습니다.",
                 ephemeral=True,
             )
             return
@@ -287,12 +287,13 @@ class MembersCog(commands.Cog):
         ]
 
         embed = discord.Embed(
-            title="출석 대원 목록",
+            title="👥 출석 대원 목록",
             description="\n".join(description_lines),
+            color=discord.Color.blurple(),
         )
 
         embed.set_footer(
-            text=f"활성 대원 {len(members)}명",
+            text=f"✅ 활성 대원 {len(members)}명",
         )
 
         await interaction.response.send_message(
