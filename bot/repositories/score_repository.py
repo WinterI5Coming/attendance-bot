@@ -57,6 +57,8 @@ class ScoreRepository:
             "PRESENT": "ATTENDANCE_PRESENT",
             "LATE": "ATTENDANCE_LATE",
             "ABSENT": "ATTENDANCE_ABSENT",
+            "EXCUSED_LATE": "ATTENDANCE_EXCUSED_LATE",
+            "EXCUSED_ABSENT": "ATTENDANCE_EXCUSED_ABSENT",
         }
 
         try:
@@ -189,6 +191,56 @@ class ScoreRepository:
                 member_id,
                 delta,
                 attendance_record_id,
+                dedup_key,
+                description,
+                created_by_discord_id,
+                created_at,
+            ),
+        )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    async def create_event(
+        self,
+        *,
+        guild_id: str,
+        member_id: int,
+        event_type: str,
+        delta: int,
+        reference_type: str | None,
+        reference_id: int | None,
+        dedup_key: str,
+        description: str,
+        created_by_discord_id: str | None,
+        created_at: str,
+        connection: aiosqlite.Connection,
+    ) -> int:
+        """Create a generic score event with an explicit deduplication key."""
+
+        cursor = await connection.execute(
+            """
+            INSERT INTO score_events (
+                guild_id,
+                member_id,
+                event_type,
+                delta,
+                reference_type,
+                reference_id,
+                dedup_key,
+                description,
+                created_by_discord_id,
+                created_at,
+                reversed_event_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
+            """,
+            (
+                guild_id,
+                member_id,
+                event_type,
+                delta,
+                reference_type,
+                reference_id,
                 dedup_key,
                 description,
                 created_by_discord_id,

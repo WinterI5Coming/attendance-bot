@@ -81,9 +81,9 @@ class AttendanceRepository:
         Args:
             session_id: ``attendance_sessions.id``.
             member_id: ``members.id``.
-            status: Attendance status. This method accepts only PRESENT or
-                LATE because ABSENT and excused statuses are created by later
-                workflows.
+            status: Attendance status. This method accepts PRESENT, LATE, or
+                EXCUSED_LATE because user check-in can apply an approved
+                excuse during the late window.
             checked_at: UTC ISO 8601 timestamp for the check-in.
             connection: Existing transaction connection owned by the service.
 
@@ -91,13 +91,15 @@ class AttendanceRepository:
             The created attendance record.
 
         Raises:
-            ValueError: If ``status`` is not PRESENT or LATE.
+            ValueError: If ``status`` is not PRESENT, LATE, or EXCUSED_LATE.
             aiosqlite.IntegrityError: If a UNIQUE or FOREIGN KEY constraint is
                 violated.
         """
 
-        if status not in {"PRESENT", "LATE"}:
-            raise ValueError("User check-in can create only PRESENT or LATE records.")
+        if status not in {"PRESENT", "LATE", "EXCUSED_LATE"}:
+            raise ValueError(
+                "User check-in can create only PRESENT, LATE, or EXCUSED_LATE records."
+            )
 
         cursor = await connection.execute(
             """
@@ -133,11 +135,31 @@ class AttendanceRepository:
         assert record is not None
         return record
 
+    async def set_excuse_request(
+        self,
+        *,
+        attendance_record_id: int,
+        excuse_request_id: int,
+        connection: aiosqlite.Connection,
+    ) -> None:
+        """Link an attendance record to an approved excuse request."""
+
+        await connection.execute(
+            """
+            UPDATE attendance_records
+            SET excuse_request_id = ?
+            WHERE id = ?;
+            """,
+            (excuse_request_id, attendance_record_id),
+        )
+
     async def create_auto_absent_record(
         self,
         *,
         session_id: int,
         member_id: int,
+        status: str = "ABSENT",
+        excuse_request_id: int | None = None,
         now: str,
         connection: aiosqlite.Connection,
     ) -> dict[str, Any]:
@@ -146,6 +168,8 @@ class AttendanceRepository:
         Args:
             session_id: attendance_sessions.id.
             member_id: members.id.
+            status: ABSENT or EXCUSED_ABSENT.
+            excuse_request_id: Approved excuse request ID when excused.
             now: UTC ISO 8601 생성/수정 시각.
             connection: 마감 트랜잭션에서 공유하는 connection.
 
@@ -155,6 +179,9 @@ class AttendanceRepository:
         Raises:
             aiosqlite.IntegrityError: UNIQUE/FK 제약 위반 시.
         """
+
+        if status not in {"ABSENT", "EXCUSED_ABSENT"}:
+            raise ValueError("Auto close can create only ABSENT or EXCUSED_ABSENT.")
 
         cursor = await connection.execute(
             """
@@ -169,9 +196,9 @@ class AttendanceRepository:
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, 'ABSENT', NULL, 'AUTO', 'NULL', NULL, ?, ?);
-            """.replace("'NULL'", "NULL"),
-            (session_id, member_id, now, now),
+            VALUES (?, ?, ?, NULL, 'AUTO', ?, NULL, ?, ?);
+            """,
+            (session_id, member_id, status, excuse_request_id, now, now),
         )
         assert cursor.lastrowid is not None
         record = await self.get_by_session_and_member(
@@ -272,4 +299,30 @@ class AttendanceRepository:
             WHERE id = ?;
             """,
             (status, checked_at, note, now, attendance_record_id),
+        )
+
+    async def update_status_for_excuse(
+        self,
+        *,
+        attendance_record_id: int,
+        new_status: str,
+        excuse_request_id: int,
+        now: str,
+        connection: aiosqlite.Connection,
+    ) -> None:
+        """Apply an approved excuse to an existing attendance record."""
+
+        if new_status not in {"PRESENT", "EXCUSED_LATE", "EXCUSED_ABSENT"}:
+            raise ValueError("Invalid status for excuse reconciliation.")
+
+        await connection.execute(
+            """
+            UPDATE attendance_records
+            SET
+                status = ?,
+                excuse_request_id = ?,
+                updated_at = ?
+            WHERE id = ?;
+            """,
+            (new_status, excuse_request_id, now, attendance_record_id),
         )
