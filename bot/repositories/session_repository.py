@@ -388,6 +388,125 @@ class SessionRepository:
         finally:
             await connection.close()
 
+    async def list_start_announcement_targets(
+        self,
+    ) -> list[dict[str, Any]]:
+        """List open sessions whose start announcement was not sent."""
+
+        connection = await self.database.connect()
+
+        try:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    s.id,
+                    s.guild_id,
+                    s.attendance_date,
+                    s.start_at,
+                    s.late_at,
+                    s.close_at,
+                    gs.attendance_channel_id,
+                    gs.announcement_channel_id,
+                    gs.timezone
+                FROM attendance_sessions AS s
+                JOIN guild_settings AS gs ON gs.guild_id = s.guild_id
+                WHERE s.status = 'OPEN'
+                  AND s.start_announced_at IS NULL
+                ORDER BY s.start_at, s.id;
+                """
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            return [dict(row) for row in rows]
+        finally:
+            await connection.close()
+
+    async def list_close_announcement_targets(
+        self,
+    ) -> list[dict[str, Any]]:
+        """List closed sessions whose close announcement was not sent."""
+
+        connection = await self.database.connect()
+
+        try:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    s.id,
+                    s.guild_id,
+                    s.attendance_date,
+                    s.start_at,
+                    s.late_at,
+                    s.close_at,
+                    s.closed_at,
+                    gs.attendance_channel_id,
+                    gs.announcement_channel_id,
+                    gs.timezone
+                FROM attendance_sessions AS s
+                JOIN guild_settings AS gs ON gs.guild_id = s.guild_id
+                WHERE s.status = 'CLOSED'
+                  AND s.close_announced_at IS NULL
+                ORDER BY s.closed_at, s.id;
+                """
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            return [dict(row) for row in rows]
+        finally:
+            await connection.close()
+
+    async def mark_start_announced(
+        self,
+        *,
+        session_id: int,
+        now: str,
+    ) -> None:
+        """Mark a session start announcement as sent."""
+
+        connection = await self.database.connect()
+
+        try:
+            await connection.execute(
+                """
+                UPDATE attendance_sessions
+                SET start_announced_at = ?, updated_at = ?
+                WHERE id = ? AND start_announced_at IS NULL;
+                """,
+                (now, now, session_id),
+            )
+            await connection.commit()
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
+    async def mark_close_announced(
+        self,
+        *,
+        session_id: int,
+        now: str,
+    ) -> None:
+        """Mark a session close announcement as sent."""
+
+        connection = await self.database.connect()
+
+        try:
+            await connection.execute(
+                """
+                UPDATE attendance_sessions
+                SET close_announced_at = ?, updated_at = ?
+                WHERE id = ? AND close_announced_at IS NULL;
+                """,
+                (now, now, session_id),
+            )
+            await connection.commit()
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
     async def list_unchecked_members(
         self,
         *,

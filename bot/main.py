@@ -244,6 +244,7 @@ class AttendanceBot(commands.Bot):
             len(synced_commands),
         )
 
+        attendance_scheduler.bot = self
         await attendance_scheduler.recover_overdue_sessions(
             datetime.now(timezone.utc)
         )
