@@ -7,14 +7,17 @@ import discord
 from discord.ext import commands
 
 from bot.cogs.attendance import AttendanceCog
+from bot.cogs.evaluations import EvaluationsCog
 from bot.cogs.excuses import ExcusesCog
 from bot.cogs.members import MembersCog
 from bot.cogs.reports import ReportsCog
+from bot.cogs.settings import SettingsCog
 from bot.cogs.setup import SetupCog
 from bot.config import load_settings
 from bot.db.database import Database
 from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.attendance_repository import AttendanceRepository
+from bot.repositories.evaluation_repository import EvaluationRepository
 from bot.repositories.excuse_repository import ExcuseRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
@@ -22,7 +25,11 @@ from bot.repositories.report_repository import ReportRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
 from bot.scheduler.attendance_loop import AttendanceScheduler
+from bot.scheduler.backup_loop import BackupScheduler
+from bot.services.admin_service import AdminService
 from bot.services.attendance_service import AttendanceService
+from bot.services.backup_service import BackupService
+from bot.services.evaluation_service import EvaluationService
 from bot.services.excuse_service import ExcuseService
 from bot.services.guild_service import GuildService
 from bot.services.member_service import MemberService
@@ -112,6 +119,11 @@ excuse_repository = ExcuseRepository(
 )
 
 
+evaluation_repository = EvaluationRepository(
+    database=database,
+)
+
+
 streak_service = StreakService(
     score_repository=score_repository,
 )
@@ -157,12 +169,39 @@ report_service = ReportService(
     report_repository=report_repository,
     score_repository=score_repository,
     streak_service=streak_service,
+    evaluation_repository=evaluation_repository,
+)
+
+
+evaluation_service = EvaluationService(
+    member_repository=member_repository,
+    score_repository=score_repository,
+    evaluation_repository=evaluation_repository,
+    audit_repository=audit_repository,
+)
+
+
+admin_service = AdminService(
+    guild_repository=guild_repository,
+    session_repository=session_repository,
+    score_repository=score_repository,
+    audit_repository=audit_repository,
 )
 
 
 attendance_scheduler = AttendanceScheduler(
     guild_service=guild_service,
     session_service=session_service,
+)
+
+
+backup_service = BackupService(
+    database=database,
+)
+
+
+backup_scheduler = BackupScheduler(
+    backup_service=backup_service,
 )
 
 
@@ -226,6 +265,20 @@ class AttendanceBot(commands.Bot):
             )
         )
 
+        await self.add_cog(
+            EvaluationsCog(
+                evaluation_service=evaluation_service,
+                guild_service=guild_service,
+            )
+        )
+
+        await self.add_cog(
+            SettingsCog(
+                admin_service=admin_service,
+                guild_service=guild_service,
+            )
+        )
+
         # 3. 개발 서버에 슬래시 명령어를 동기화한다.
         development_guild = discord.Object(
             id=settings.development_guild_id,
@@ -249,6 +302,7 @@ class AttendanceBot(commands.Bot):
             datetime.now(timezone.utc)
         )
         attendance_scheduler.start()
+        backup_scheduler.start()
 
 
 bot = AttendanceBot()
