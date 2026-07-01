@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.services.report_service import PersonalReportResult, ReportService
+from bot.services.report_service import PersonalReportResult, RankingResult, ReportService
 from bot.utils.time_utils import format_local_hhmm
 
 
@@ -64,6 +64,37 @@ class ReportsCog(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="랭킹",
+        description="현재 출석 점수 랭킹을 조회합니다.",
+    )
+    @app_commands.guild_only()
+    async def ranking(self, interaction: discord.Interaction) -> None:
+        """Handle the /랭킹 command."""
+
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            result = await self.report_service.get_ranking(guild_id=guild.id)
+        except Exception:
+            logger.exception("랭킹 조회 중 오류가 발생했습니다. guild_id=%s", guild.id)
+            await interaction.response.send_message(
+                "랭킹 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            self._build_ranking_message(result),
+            ephemeral=False,
+        )
+
     def _build_message(self, result: PersonalReportResult) -> str:
         """Build the personal report message."""
 
@@ -94,7 +125,25 @@ class ReportsCog(commands.Cog):
             f"사유 지각: {result.excused_late_count}회\n"
             f"사유 결석: {result.excused_absent_count}회\n"
             f"출석률: {result.attendance_rate:.1f}%\n"
-            "연속 출석: 다음 단계에서 제공 예정\n\n"
+            f"연속 출석: {result.current_streak}회\n\n"
             "최근 점수 변화\n"
             + "\n".join(recent_lines)
         )
+
+    def _build_ranking_message(self, result: RankingResult) -> str:
+        """Build the ranking response."""
+
+        if not result.configured:
+            return "아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
+
+        entries = result.entries or []
+        if not entries:
+            return "랭킹에 표시할 활성 대원이 없습니다."
+
+        lines = ["출석 랭킹"]
+        for entry in entries:
+            lines.append(
+                f"{entry.rank_no}. <@{entry.discord_id}> "
+                f"{entry.total_score}점 / {entry.rank} / 연속 {entry.current_streak}회"
+            )
+        return "\n".join(lines)
