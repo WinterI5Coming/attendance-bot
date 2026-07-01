@@ -198,6 +198,45 @@ class GuildRepository:
         finally:
             await connection.close()
 
+    async def update_settings(
+        self,
+        *,
+        guild_id: str,
+        fields: dict[str, str],
+        now: str,
+        connection,
+    ) -> None:
+        """Update a validated subset of guild settings in a caller transaction."""
+
+        allowed_fields = {
+            "timezone",
+            "attendance_days",
+            "attendance_start",
+            "late_deadline",
+            "close_deadline",
+            "excuse_mode",
+            "officer_role_id",
+            "attendance_channel_id",
+            "announcement_channel_id",
+        }
+        invalid_fields = set(fields) - allowed_fields
+        if invalid_fields:
+            raise ValueError(f"Unsupported guild setting fields: {sorted(invalid_fields)!r}")
+        if not fields:
+            return
+
+        assignments = ", ".join([f"{field} = ?" for field in fields])
+        values = list(fields.values())
+        values.extend([now, guild_id])
+        await connection.execute(
+            f"""
+            UPDATE guild_settings
+            SET {assignments}, updated_at = ?
+            WHERE guild_id = ?;
+            """,
+            values,
+        )
+
     async def update_session_window_if_unrecorded(
         self,
         *,

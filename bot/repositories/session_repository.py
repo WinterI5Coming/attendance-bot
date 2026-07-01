@@ -572,3 +572,125 @@ class SessionRepository:
             """,
             (now, now, session_id),
         )
+
+    async def cancel_session(
+        self,
+        *,
+        session_id: int,
+        reason: str,
+        now: str,
+        connection: aiosqlite.Connection,
+    ) -> None:
+        """Mark a scheduled or open session as cancelled."""
+
+        await connection.execute(
+            """
+            UPDATE attendance_sessions
+            SET
+                status = 'CANCELLED',
+                cancelled_at = ?,
+                cancel_reason = ?,
+                updated_at = ?
+            WHERE id = ?
+              AND status IN ('SCHEDULED', 'OPEN');
+            """,
+            (now, reason, now, session_id),
+        )
+
+    async def resume_cancelled_session(
+        self,
+        *,
+        session_id: int,
+        status: str,
+        opened_at: str | None,
+        now: str,
+        connection: aiosqlite.Connection,
+    ) -> None:
+        """Resume a cancelled session as SCHEDULED or OPEN."""
+
+        if status not in {"SCHEDULED", "OPEN"}:
+            raise ValueError("Resumed session status must be SCHEDULED or OPEN.")
+
+        await connection.execute(
+            """
+            UPDATE attendance_sessions
+            SET
+                status = ?,
+                opened_at = ?,
+                cancelled_at = NULL,
+                cancel_reason = NULL,
+                start_announced_at = NULL,
+                close_announced_at = NULL,
+                updated_at = ?
+            WHERE id = ?
+              AND status = 'CANCELLED';
+            """,
+            (status, opened_at, now, session_id),
+        )
+
+    async def list_attendance_score_events(
+        self,
+        *,
+        session_id: int,
+        connection: aiosqlite.Connection,
+    ) -> list[dict[str, Any]]:
+        """List score events generated from attendance records in a session."""
+
+        cursor = await connection.execute(
+            """
+            SELECT
+                se.id,
+                se.guild_id,
+                se.member_id,
+                se.event_type,
+                se.delta,
+                se.reference_type,
+                se.reference_id,
+                se.description
+            FROM attendance_records AS ar
+            JOIN score_events AS se
+                ON se.reference_type = 'ATTENDANCE'
+                AND se.reference_id = ar.id
+            WHERE ar.session_id = ?
+              AND se.reversed_event_id IS NULL
+            ORDER BY se.id;
+            """,
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [dict(row) for row in rows]
+
+    async def list_session_reversal_events(
+        self,
+        *,
+        session_id: int,
+        prefix: str,
+        connection: aiosqlite.Connection,
+    ) -> list[dict[str, Any]]:
+        """List session cancel/resume reversal events by dedup key prefix."""
+
+        cursor = await connection.execute(
+            """
+            SELECT
+                id,
+                guild_id,
+                member_id,
+                event_type,
+                delta,
+                reference_type,
+                reference_id,
+                dedup_key,
+                description,
+                reversed_event_id
+            FROM score_events
+            WHERE reference_type = 'SESSION'
+              AND reference_id = ?
+              AND dedup_key LIKE ?
+            ORDER BY id;
+            """,
+            (session_id, f"{prefix}:{session_id}:%"),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [dict(row) for row in rows]
