@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from bot.cogs.attendance import AttendanceCog
+from bot.cogs.excuses import ExcusesCog
 from bot.cogs.members import MembersCog
 from bot.cogs.reports import ReportsCog
 from bot.cogs.setup import SetupCog
@@ -14,6 +15,7 @@ from bot.config import load_settings
 from bot.db.database import Database
 from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.attendance_repository import AttendanceRepository
+from bot.repositories.excuse_repository import ExcuseRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.report_repository import ReportRepository
@@ -21,10 +23,12 @@ from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
 from bot.scheduler.attendance_loop import AttendanceScheduler
 from bot.services.attendance_service import AttendanceService
+from bot.services.excuse_service import ExcuseService
 from bot.services.guild_service import GuildService
 from bot.services.member_service import MemberService
 from bot.services.report_service import ReportService
 from bot.services.session_service import SessionService
+from bot.services.streak_service import StreakService
 
 
 # .env 파일의 환경변수를 읽는다.
@@ -103,12 +107,23 @@ report_repository = ReportRepository(
 )
 
 
+excuse_repository = ExcuseRepository(
+    database=database,
+)
+
+
+streak_service = StreakService(
+    score_repository=score_repository,
+)
+
+
 session_service = SessionService(
     guild_repository=guild_repository,
     member_repository=member_repository,
     session_repository=session_repository,
     attendance_repository=attendance_repository,
     score_repository=score_repository,
+    excuse_repository=excuse_repository,
 )
 
 
@@ -120,6 +135,19 @@ attendance_service = AttendanceService(
     session_service=session_service,
     guild_repository=guild_repository,
     audit_repository=audit_repository,
+    excuse_repository=excuse_repository,
+    streak_service=streak_service,
+)
+
+
+excuse_service = ExcuseService(
+    guild_repository=guild_repository,
+    member_repository=member_repository,
+    session_repository=session_repository,
+    attendance_repository=attendance_repository,
+    score_repository=score_repository,
+    excuse_repository=excuse_repository,
+    audit_repository=audit_repository,
 )
 
 
@@ -128,6 +156,7 @@ report_service = ReportService(
     member_repository=member_repository,
     report_repository=report_repository,
     score_repository=score_repository,
+    streak_service=streak_service,
 )
 
 
@@ -187,6 +216,13 @@ class AttendanceBot(commands.Bot):
         await self.add_cog(
             ReportsCog(
                 report_service=report_service,
+            )
+        )
+
+        await self.add_cog(
+            ExcusesCog(
+                excuse_service=excuse_service,
+                guild_service=guild_service,
             )
         )
 
