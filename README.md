@@ -1,382 +1,346 @@
-# attendance-bot
+# Discord Attendance Bot
 
-Discord 슬래시 명령어 기반 출석 관리 봇. 서버별로 출석 시간을 설정하고,
-매일 출석 세션을 자동으로 열고 닫으며, 출석 점수·연속 출석 보너스·
-랭킹·사유 지각(결석) 승인까지 처리한다.
+> Discord 서버의 출석, 사유 신청, 점수, 시즌, 업적, 간부 인사를 SQLite 기반으로 관리하는 근태관리봇입니다.  
+> A SQLite-backed Discord attendance bot for check-ins, excuses, scores, seasons, achievements, and officer reviews.
 
-## 목차
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![Discord.py](https://img.shields.io/badge/discord.py-slash%20commands-5865F2)
+![SQLite](https://img.shields.io/badge/Database-SQLite-003B57)
+![Tests](https://img.shields.io/badge/tests-99%20passed-brightgreen)
 
-- [주요 기능](#주요-기능)
-- [아키텍처와 서비스 흐름](#아키텍처와-서비스-흐름)
-- [명령어 목록](#명령어-목록)
-- [설치 및 실행 방법](#설치-및-실행-방법)
-- [데이터베이스와 마이그레이션](#데이터베이스와-마이그레이션)
-- [프로젝트 구조](#프로젝트-구조)
-- [테스트](#테스트)
-- [실사 운영 검증 체크리스트](#실사-운영-검증-체크리스트)
+## Table Of Contents
 
-## 주요 기능
+- [Overview](#overview)
+- [Features](#features)
+- [Command Guide](#command-guide)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Database And Migrations](#database-and-migrations)
+- [Testing](#testing)
+- [Operations Checklist](#operations-checklist)
+- [English Summary](#english-summary)
 
-- **서버 초기설정**: 간부 역할, 출석/공지 채널, 출석 요일, 출석 시간,
-  사유 승인 방식을 서버별로 설정한다.
-- **대원 관리**: Discord 사용자를 출석 대상 대원으로 등록/제외/조회한다.
-- **출석 세션 자동 운영**: 설정된 시간에 맞춰 매일 세션을 자동 생성하고,
-  마감 시간이 지나면 미체크 인원을 자동으로 결석 처리한다.
-- **출석 체크인**: `/출석`으로 정상 출석·지각·사유 지각을 기록하고
-  점수를 즉시 반영한다.
-- **관리자 정정**: 간부가 이미 기록된 출석을 다른 상태로 정정하고,
-  점수 차이를 자동 보정하며 감사 로그를 남긴다.
-- **사유 지각/결석 신청**: 출석 시작 전에 사유를 신청하고, 간부가
-  승인/거절하면 출석 기록과 점수에 자동으로 반영된다.
-- **연속 출석 보너스**: 3회/7회 연속 출석 시 보너스 점수를 한 번만 지급한다.
-- **랭킹/개인 리포트**: `/랭킹`으로 서버 전체 순위를, `/내정보`로 개인
-  통계(출석률, 연속 출석, 최근 점수 변화)를 조회한다.
-- **자동 공지**: 출석 시작/마감 시 지정한 채널에 안내 메시지를 자동 발송한다.
+## Overview
 
-## 아키텍처와 서비스 흐름
+이 프로젝트는 Discord 커뮤니티의 반복적인 근태 운영을 자동화합니다. 대원을 등록하고, 매일 정해진 시간에 출석 세션을 열고, 출석/지각/결석/사유 처리를 점수 장부와 함께 관리합니다.
 
-### 계층 구조
+The bot is designed for communities that need repeatable attendance operations: daily check-in sessions, officer approvals, attendance corrections, score ledgers, seasonal rankings, achievements, and audited role changes.
 
+핵심 원칙:
+
+- 기존 점수 기록은 삭제하거나 수정하지 않고 `score_events`에 보정 이벤트를 추가합니다.
+- 마이그레이션은 버전 순서대로 추가하며 기존 migration 파일을 수정하지 않습니다.
+- Discord 역할 변경은 DB 저장 이후에 수행하고, 성공/실패 이력을 별도로 남깁니다.
+- 개인 점수 계급과 Discord 간부/대원 역할은 서로 다른 정책으로 분리합니다.
+
+## Features
+
+- 서버별 초기 설정: 간부 역할, 출석 채널, 공지 채널, 출석 요일과 시간
+- 대원 관리: 등록, 제외, 활성 대원 목록 조회
+- 출석 세션 자동 운영: 세션 생성, 시작 공지, 마감 처리, 재시작 복구
+- 출석 체크: 정상 출석, 지각, 결석, 사유 지각/결석
+- 사유 신청: 신청, 취소, 승인, 거절, 감사 로그
+- 점수 장부: 출석 점수, 보정 점수, 평가 점수, 수동 조정, 취소 보정
+- 리포트: 내 정보, 공개 리포트, 랭킹, 주간 보고
+- Stage A: 음성 채널 체류 기반 출석 검증
+- Stage B: 지각 감면, 결석 면제, 통계 반영
+- Stage C: 시즌, 시즌 랭킹, 업적, 칭호, 업적 역할, 간부 인사 미리보기/실행
+- 상세 도움말: Discord 안에서 `/도움말`로 명령 사용법 확인
+
+## Command Guide
+
+봇 안에서 가장 자세한 사용법은 `/도움말` 명령으로 확인할 수 있습니다.
+
+```text
+/도움말
+/도움말 카테고리:시작하기
+/도움말 카테고리:출석
+/도움말 카테고리:사유 신청
+/도움말 카테고리:리포트와 점수
+/도움말 카테고리:감면과 면제
+/도움말 카테고리:시즌과 업적
+/도움말 카테고리:간부 인사
 ```
-Discord 슬래시 명령어
-        │
-        ▼
-   bot/cogs/*        Discord 상호작용을 받아 입력을 검증하고 Service를 호출한다.
-        │
-        ▼
- bot/services/*      비즈니스 규칙(점수 계산, 상태 전이, 권한 판단)을 처리한다.
-        │
-        ▼
-bot/repositories/*    SQLite에 직접 접근해 조회/삽입/갱신을 수행한다.
-        │
-        ▼
-   bot/db/database.py  연결 관리와 SQL 마이그레이션 적용을 담당한다.
+
+대표 명령:
+
+| Category | Command | Permission | Purpose |
+| --- | --- | --- | --- |
+| Setup | `/초기설정` | Server admin | 서버의 기본 역할과 채널을 설정합니다. |
+| Setup | `/대원등록` | Officer/admin | Discord 사용자를 출석 대상자로 등록합니다. |
+| Attendance | `/출석` | Registered member | 오늘 출석 세션에 체크인합니다. |
+| Attendance | `/출석현황` | Everyone | 오늘 출석 현황을 조회합니다. |
+| Attendance | `/출석수정` | Officer/admin | 특정 날짜의 출석 기록을 정정합니다. |
+| Excuse | `/사유신청` | Registered member | 지각/결석 사유를 신청합니다. |
+| Excuse | `/사유승인` | Officer/admin | 대기 중인 사유 신청을 승인합니다. |
+| Report | `/내정보` | Registered member | 내 점수, 계급, 출석률을 조회합니다. |
+| Report | `/랭킹` | Everyone | 서버 점수 랭킹을 조회합니다. |
+| Stage B | `/지각감면` | Officer/admin | 승인 사유 기반 지각 시간을 감면합니다. |
+| Stage B | `/결석면제` | Officer/admin | 승인 사유 기반 결석 감점을 면제합니다. |
+| Stage C | `/시즌생성` | Officer/admin | 새 시즌을 생성합니다. |
+| Stage C | `/시즌랭킹` | Everyone | 시즌별 랭킹을 조회합니다. |
+| Stage C | `/업적평가` | Officer/admin | 시즌 통계 기준 업적과 보상을 지급합니다. |
+| Stage C | `/간부인사미리보기` | Officer/admin | 역할 변경 없이 인사안을 저장합니다. |
+| Stage C | `/간부인사실행` | Server admin | 저장된 인사안을 실제 역할 변경으로 적용합니다. |
+
+## Architecture
+
+```text
+Discord slash commands
+        |
+        v
+bot/cogs/*          사용자 입력 검증, 권한 확인, 응답 메시지 구성
+        |
+        v
+bot/services/*      비즈니스 규칙, 트랜잭션 흐름, 점수/통계 계산
+        |
+        v
+bot/repositories/*  SQLite 쿼리, CRUD, 조회 전용 집계
+        |
+        v
+bot/db/database.py  연결 관리, PRAGMA, SQL migration 적용
 ```
 
-- **policies** (`bot/policies/`): 출석 상태별 점수(`score_policy.py`)와
-  총점 구간별 계급(`rank_policy.py`) 같은 순수 규칙만 모아둔다.
-- **utils** (`bot/utils/`): 시간대 변환, 출석 창 계산, 권한 검사처럼
-  여러 Service에서 공통으로 쓰는 헬퍼를 둔다.
-- **scheduler** (`bot/scheduler/attendance_loop.py`): 주기적으로 실행되는
-  백그라운드 루프로, 세션 자동 생성/마감/공지를 트리거한다.
+주요 디렉터리:
 
-각 Service는 여러 Repository와 다른 Service(예: `StreakService`,
-`ExcuseRepository`)를 생성자 주입으로 받아 조립되며, 실제 조립은
-`bot/main.py`에서 한 번에 이뤄진다.
+| Path | Description |
+| --- | --- |
+| `bot/cogs/` | Discord slash command handlers |
+| `bot/services/` | Business rules and orchestration |
+| `bot/repositories/` | SQLite data access layer |
+| `bot/policies/` | Score and rank policies |
+| `bot/scheduler/` | Attendance and backup background loops |
+| `bot/db/migrations/` | Versioned SQLite migrations |
+| `tests/` | Unit and integration tests |
 
-### 하루 출석 세션의 흐름
+## Quick Start
 
-1. **세션 생성** — `AttendanceScheduler`가 매 tick마다 설정이 끝난 모든
-   서버를 확인해 오늘 날짜 세션이 없으면 `guild_settings`의 출석
-   시작/지각/마감 시간으로 세션을 생성한다(`SessionService.prepare_today_session`).
-2. **시작 공지** — 세션이 `OPEN` 상태가 되면(`start_at` 도달) 공지 채널에
-   시작 안내를 한 번만 보낸다(`start_announced_at` 기록으로 중복 방지).
-3. **체크인** — 대원이 `/출석`을 실행하면 `AttendanceService.check_in`이
-   - 세션이 열려 있는지, 이미 체크인했는지 확인하고
-   - 현재 시각을 정상/지각 구간과 비교해 상태를 정하고
-   - 승인된 사유 신청이 있으면 지각을 `EXCUSED_LATE`로 전환하고
-   - 출석 기록 생성, 점수 이벤트 생성, 연속 출석 보너스 계산을
-     하나의 DB 트랜잭션으로 원자적으로 처리한다.
-4. **마감 처리** — 마감 시간이 지나면 스케줄러가
-   `SessionService.process_overdue_sessions`를 호출해 아직 체크인하지
-   않은 대원을 조회하고, 승인된 사유가 있으면 `EXCUSED_ABSENT`, 없으면
-   `ABSENT`로 기록하며 각각의 점수 이벤트를 남긴 뒤 세션을 `CLOSED`로
-   전환한다. 봇이 재시작되면 `recover_overdue_sessions`가 동일한 로직으로
-   놓친 마감을 복구한다(중복 처리 방지).
-5. **마감 공지** — 세션이 닫히면 마감 안내를 공지 채널에 한 번만 보낸다.
-6. **조회/정정** — 이후 `/출석현황`으로 오늘 현황을, `/내정보`·`/랭킹`으로
-   누적 통계를 확인할 수 있고, 간부는 `/출석수정`으로 기록을 정정하면
-   점수 차액과 감사 로그(`audit_logs`)가 함께 남는다.
+### 1. Requirements
 
-### 사유 지각/결석 신청 흐름
+- Python 3.11 이상
+- Discord Application과 Bot Token
+- 테스트용 Discord 서버 ID
 
-1. 대원이 출석 시작 전 `/사유신청`으로 날짜·사유·예상 시간을 제출하면
-   `ExcuseService.create_request`가 날짜/요일/중복 여부를 검증하고
-   `excuse_requests`에 `PENDING`(또는 서버 설정이 자동승인이면
-   `AUTO_APPROVED`) 상태로 저장한다.
-2. 간부가 `/사유목록`으로 대기 중인 신청을 확인하고 `/사유승인` 또는
-   `/사유거절`을 실행한다.
-3. 승인되면 `ExcuseService._reconcile_attendance_for_approval`이 실행되어
-   - 이미 출석 기록이 있으면 `LATE → EXCUSED_LATE`, `ABSENT → EXCUSED_ABSENT`로
-     상태를 바꾸고 점수 차액을 보정 이벤트로 기록하고,
-   - 아직 체크인 전이면 이후 `/출석` 체크인이나 자동 마감 시점에
-     반영된다.
-4. 신청자는 아직 출석에 반영되지 않은 신청을 `/사유취소`로 취소할 수
-   있다. 모든 승인/거절/취소는 `audit_logs`에 기록된다.
-
-### 연속 출석과 랭킹
-
-- `StreakService.calculate_current_streak`는 최근 세션부터 역순으로
-  `PRESENT`/`LATE`/`EXCUSED_LATE`가 이어지는 횟수를 센다.
-  `EXCUSED_ABSENT`는 연속 기록을 끊지 않지만 횟수도 올리지 않고,
-  일반 `ABSENT`는 연속 기록을 끊는다.
-- 정상 체크인마다 연속 횟수가 3 또는 7이 되면 `STREAK_BONUS` 점수를
-  한 번만 지급한다(세션·대원·streak 값 기준 dedup key로 중복 방지).
-- `/랭킹`은 활성 대원 전체의 총점 내림차순 → 연속 출석 내림차순 →
-  이름순으로 정렬해 계급과 함께 보여준다.
-
-### 자동 공지 스케줄러
-
-`AttendanceScheduler`는 discord.py의 `tasks.loop`로 주기 실행되며, 매
-tick마다 (1) 신규 세션 생성 → (2) 시작 공지 → (3) 마감 처리 →
-(4) 마감 공지 순으로 실행한다. 공지 대상은 `announcement_channel_id`가
-있으면 그 채널, 없으면 출석 채널로 보낸다.
-
-## 명령어 목록
-
-| 명령어 | 대상 | 설명 |
-| --- | --- | --- |
-| `/초기설정` | 서버 관리자 | 간부 역할, 채널, 출석 요일/시간, 사유 승인 방식을 최초 설정한다. |
-| `/출석시간설정` | 서버 관리자 | 출석 시작/지각/마감 시간을 변경한다. |
-| `/대원등록` | 간부 | Discord 사용자를 출석 대원으로 등록한다. |
-| `/대원제외` | 간부 | 대원을 이후 출석 대상에서 제외한다. |
-| `/대원목록` | 전체 | 현재 활성 대원 목록을 조회한다. |
-| `/출석` | 전체 | 오늘 출석 세션에 체크인한다. |
-| `/출석현황` | 전체 | 오늘 세션의 정상·지각·미체크 현황을 조회한다. |
-| `/출석수정` | 간부 | 특정 날짜의 출석 기록을 정정한다. |
-| `/사유신청` | 전체 | 출석 시작 전 사유 지각/결석을 신청한다. |
-| `/사유취소` | 전체 | 아직 반영되지 않은 내 신청을 취소한다. |
-| `/사유목록` | 전체(본인)/간부(전체조회) | 사유 신청 목록을 조회한다. |
-| `/사유승인` | 간부 | 대기 중인 사유 신청을 승인한다. |
-| `/사유거절` | 간부 | 대기 중인 사유 신청을 거절한다. |
-| `/내정보` | 전체 | 내 출석 통계, 연속 출석, 최근 점수 변화를 조회한다. |
-| `/랭킹` | 전체 | 서버 출석 점수 랭킹을 조회한다. |
-| `/핑` | 전체 | 봇 연결 상태와 응답 속도를 확인한다. |
-
-"간부"는 `/초기설정`에서 지정한 역할 보유자 또는 서버 소유자/관리자를
-말한다(`bot/utils/permissions.py`).
-
-## 설치 및 실행 방법
-
-### 1. 사전 준비
-
-- Python 3.11 이상 (개발/검증은 3.13 기준)
-- Discord 개발자 포털(https://discord.com/developers/applications)에서
-  애플리케이션과 봇을 생성하고 **Bot Token**을 발급받는다.
-- 봇 초대 시 OAuth2 URL Generator에서 `bot`, `applications.commands`
-  스코프와 최소한 `Send Messages`, `Embed Links`, `Read Message History`
-  권한을 선택해 서버에 초대한다. (봇은 메시지 콘텐츠 인텐트가 필요 없다.)
-- 슬래시 명령어를 테스트할 서버(길드)의 ID를 확인해둔다
-  (서버 아이콘 우클릭 → ID 복사, 개발자 모드 필요).
-
-### 2. 프로젝트 설정
+### 2. Install
 
 ```powershell
 git clone <repository-url>
 cd attendance-bot
 
 python -m venv venv
-venv\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
 ```
 
-### 3. 환경변수 설정
-
-`.env.example`을 복사해 `.env`를 만들고 값을 채운다.
+### 3. Configure
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-`.env` 항목:
+`.env`에 다음 값을 입력합니다.
 
-| 변수 | 필수 | 설명 |
-| --- | --- | --- |
-| `DISCORD_TOKEN` | 예 | Discord 봇 토큰 |
-| `DEVELOPMENT_GUILD_ID` | 예 | 슬래시 명령어를 즉시 동기화할 서버 ID |
-| `DB_PATH` | 아니오 | SQLite 파일 경로 (기본값 `data/attendance.db`) |
-| `TIMEZONE` | 아니오 | 기본 타임존 (기본값 `Asia/Seoul`) |
-| `LOG_LEVEL` | 아니오 | 로그 레벨 (기본값 `INFO`) |
-| `DEFAULT_ATTENDANCE_DAYS` | 아니오 | `/초기설정` 기본 출석 요일 |
-| `DEFAULT_ATTENDANCE_START` | 아니오 | `/초기설정` 기본 출석 시작 시간 (`HH:MM`) |
-| `DEFAULT_LATE_DEADLINE` | 아니오 | `/초기설정` 기본 지각 기준 시간 |
-| `DEFAULT_CLOSE_DEADLINE` | 아니오 | `/초기설정` 기본 마감 시간 |
-| `DEFAULT_EXCUSE_MODE` | 아니오 | `auto` 또는 `officer_approval` |
+```env
+DISCORD_TOKEN=your_discord_bot_token
+DEVELOPMENT_GUILD_ID=your_test_guild_id
+DB_PATH=data/attendance.db
+TIMEZONE=Asia/Seoul
+LOG_LEVEL=INFO
+DEFAULT_ATTENDANCE_DAYS=MON,TUE,WED,THU,FRI
+DEFAULT_ATTENDANCE_START=21:30
+DEFAULT_LATE_DEADLINE=21:40
+DEFAULT_CLOSE_DEADLINE=21:45
+DEFAULT_EXCUSE_MODE=officer_approval
+ENABLE_SEASONS=false
+```
 
-`DISCORD_TOKEN`, `DEVELOPMENT_GUILD_ID`가 없으면 `bot/config.py`에서
-바로 실행이 중단된다.
-
-> 슬래시 명령어는 현재 `DEVELOPMENT_GUILD_ID`로 지정한 서버에만
-> 동기화된다(`bot/main.py`의 `tree.copy_global_to` / `tree.sync`).
-> 다른 서버에서도 쓰려면 해당 서버 ID로 값을 바꾸거나, 글로벌
-> 동기화 방식으로 코드를 확장해야 한다.
-
-### 4. 봇 실행
+### 4. Run
 
 ```powershell
-venv\Scripts\python.exe -m bot.main
+.\venv\Scripts\python.exe -m bot.main
 ```
 
-실행하면 다음이 자동으로 이뤄진다.
+처음 실행하면 다음 작업이 자동으로 진행됩니다.
 
-1. `data/` 폴더와 SQLite 파일이 없으면 생성한다.
-2. `bot/db/migrations/*.sql`을 버전 순서대로 적용한다
-   (이미 적용된 마이그레이션은 건너뛴다).
-3. 모든 Cog를 등록하고, 개발 서버에 슬래시 명령어를 동기화한다.
-4. 재시작 복구(`recover_overdue_sessions`)를 한 번 실행해 다운타임 동안
-   놓친 마감 처리를 따라잡는다.
-5. `AttendanceScheduler`를 시작해 이후 주기적으로 세션 생성/공지/마감을
-   반복한다.
+1. SQLite DB 파일과 `data/` 디렉터리를 준비합니다.
+2. `bot/db/migrations/*.sql`을 버전 순서대로 적용합니다.
+3. Cog를 등록하고 `DEVELOPMENT_GUILD_ID` 서버에 slash command를 동기화합니다.
+4. 누락된 출석 마감 처리를 복구합니다.
+5. 출석/백업 스케줄러를 시작합니다.
 
-정상 실행되면 `/초기설정`으로 서버를 설정한 뒤 `/대원등록`으로 대원을
-등록하고 나머지 명령어를 사용할 수 있다.
+## Configuration
 
-## 데이터베이스와 마이그레이션
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `DISCORD_TOKEN` | Yes | - | Discord Bot Token |
+| `DEVELOPMENT_GUILD_ID` | Yes | - | Slash command sync target guild |
+| `DB_PATH` | No | `data/attendance.db` | SQLite database path |
+| `TIMEZONE` | No | `Asia/Seoul` | Default guild timezone |
+| `LOG_LEVEL` | No | `INFO` | Python logging level |
+| `DEFAULT_ATTENDANCE_DAYS` | No | `MON,TUE,WED,THU,FRI` | Default attendance weekdays |
+| `DEFAULT_ATTENDANCE_START` | No | `21:30` | Default check-in open time |
+| `DEFAULT_LATE_DEADLINE` | No | `21:40` | Default late threshold |
+| `DEFAULT_CLOSE_DEADLINE` | No | `21:45` | Default close time |
+| `DEFAULT_EXCUSE_MODE` | No | `officer_approval` | `auto` or `officer_approval` |
+| `EXCUSE_DEADLINE_TIME` | No | `23:00` | Default excuse request cutoff time in guild timezone |
+| `EXCUSE_DEADLINE_DAYS_BEFORE` | No | `1` | Cutoff date offset before the attendance date |
+| `REQUIRE_EXCUSE_APPROVAL` | No | `true` | New excuse requests require officer/admin approval |
+| `ALLOW_LATE_EXCUSE` | No | `false` | Registered members cannot submit after the cutoff |
+| `ENABLE_SEASONS` | No | `false` | Enables season and officer-review slash commands |
 
-- SQLite 파일 하나로 동작하며, WAL 모드와 `busy_timeout`을 사용해
-  동시 접근을 처리한다(`bot/db/database.py`).
-- 마이그레이션은 `bot/db/migrations/`에 번호 순서(`001_`, `002_`, ...)로
-  둔 `.sql` 파일이며, `schema_migrations` 테이블로 적용 여부를 추적한다.
-  새 마이그레이션은 다음 번호로 파일만 추가하면 다음 실행 시 자동 적용된다.
-- 주요 테이블: `guild_settings`, `members`, `attendance_sessions`,
-  `attendance_session_members`, `attendance_records`, `score_events`,
-  `excuse_requests`, `audit_logs`.
+## Excuse Deadline Policy
 
-## 프로젝트 구조
+기본 사유 신청 정책은 `Asia/Seoul` 기준 출석일 전날 23:00까지 신청, 관리자 승인 필수, 마감 이후 일반 사용자 신청 불가입니다.
 
-```
-bot/
-  cogs/          Discord 슬래시 명령어 (입력 검증, 응답 메시지 구성)
-  services/      비즈니스 로직 (상태 전이, 점수/연속출석 계산, 트랜잭션 조립)
-  repositories/  SQLite 접근 계층 (테이블별 CRUD)
-  policies/      점수/계급 등 순수 규칙 상수와 함수
-  scheduler/     출석 세션 자동 생성/마감/공지 백그라운드 루프
-  utils/         시간대 변환, 권한 검사 등 공통 유틸리티
-  db/            연결 관리자와 SQL 마이그레이션 파일
-  config.py      환경변수 로딩과 검증
-  main.py        전체 조립과 봇 실행 진입점
-tests/
-  integration/   실제 SQLite에 대해 마이그레이션과 서비스 흐름을 검증
-```
+- 사용자는 `/사유신청`에서 `결석`, `지각`, `조퇴` 유형을 선택해 신청합니다.
+- 신청은 `PENDING` 상태로 생성되고 `/사유승인` 이후 출석 판정과 점수에 반영됩니다.
+- 마감 이후 긴급 예외는 관리자/간부가 `/사유예외등록`으로 등록합니다.
+- 정책 확인은 `/사유정책조회`, 공개 공지는 `/사유정책공지`, 마감 시간 변경은 `/사유정책설정`을 사용합니다.
+- 환경 기본값은 새 서버 초기 설정에 적용되며, 이미 생성된 서버는 `/사유정책설정`으로 변경합니다.
 
-## 테스트
+## Message Design
+
+봇 응답은 `bot/ui/` 계층을 기준으로 통일합니다.
+
+- `bot/ui/message_theme.py`: 성공, 정보, 경고, 오류, 관리자 메시지 색상
+- `bot/ui/embed_factory.py`: 표준 Embed 생성 규칙
+- `bot/ui/formatters.py`: 점수, 출석 상태, 검증 상태, 날짜/시간 표시
+
+공개 메시지와 비공개 메시지는 다음 기준을 따릅니다.
+
+- 공개 가능: 출석 시작/마감 공지, 랭킹, 주간 보고, 공개 프로필
+- 비공개 기본: 설정 변경, 권한 부족, 오류, 사유 상세, 점수 수동 조정, 업적 역할 설정, 간부 인사 미리보기
+- 공개 메시지에는 DB 내부 ID, stack trace, dedup key, 파일 경로, 환경 변수, Token을 표시하지 않습니다.
+
+## Database And Migrations
+
+마이그레이션은 `bot/db/migrations/`의 번호 순서대로 자동 적용됩니다.
+
+현재 주요 migration:
+
+- `001_initial.sql`: 서버 설정, 대원, 출석 세션, 출석 기록, 점수 장부
+- `003_excuse_requests.sql`: 사유 신청
+- `004_evaluations.sql`: 평가와 수동 점수 조정
+- `005_stage_a_voice_verification.sql`: 음성 검증
+- `006_stage_b_attendance_adjustments.sql`: 지각 감면과 결석 면제
+- `007_stage_c_seasons_achievements_officers.sql`: 시즌, 업적, 칭호, 간부 인사
+- `008_excuse_deadline_policy.sql`: 사유 신청 마감 정책, 사유 유형, 승인 처리 메타데이터
+
+운영 DB 배포 전에는 항상 SQLite 파일을 백업하세요.
+
+### Full Data Reset
+
+운영 데이터 전체 초기화는 명시적으로 실행해야 하며, 실행 직전에 현재 SQLite DB가 `backups/before_policy_reset_YYYYMMDD_HHMMSS.db`로 자동 백업됩니다. 이 명령은 출석 기록, 사용자, 점수, 서버 설정, 사유 신청 등 운영 테이블을 비우지만 마이그레이션 이력은 보존합니다.
 
 ```powershell
-venv\Scripts\python.exe -m pytest
+AttendanceBotManager.exe --reset-all-data
 ```
 
-## 실사 운영 검증 체크리스트
+또는 소스 실행 환경에서는 다음 명령을 사용합니다.
 
-자동 테스트로 검증하기 어려운 Discord 권한, 채널 공지, 실제 시간
-경과에 따른 동작은 실제 서버에서 아래 절차로 직접 확인한다.
+```powershell
+.\venv\Scripts\python.exe manager_main.py --reset-all-data
+```
 
-### Phase 1: 기본 출석/마감/정정
+실행 후 정확히 `RESET ALL DATA`를 입력해야 초기화가 진행됩니다. 문구가 다르면 작업은 취소됩니다.
 
-#### 세션 1: 일반 마감 흐름
+## Season Feature Status
 
-- `/초기설정`이 완료되어 있는지 확인한다.
-- `/대원목록`에서 활성 대원이 의도한 인원인지 확인한다.
-- 출석 시간에 일부 사용자는 `/출석`으로 정상 출석 또는 지각 처리한다.
-- 일부 사용자는 미체크 상태로 둔다.
-- 마감 후 `attendance_records`에 미체크 사용자의 `ABSENT`가 생성됐는지 확인한다.
-- `score_events`에 결석 점수 `-3`이 생성됐는지 확인한다.
-- `attendance_sessions.status`가 `CLOSED`인지 확인한다.
+시즌 기능은 현재 **기본 비활성화** 상태입니다.
 
-#### 세션 2: 재시작 복구 흐름
+- 기본값: `ENABLE_SEASONS=false`
+- 비활성화 시 등록하지 않는 명령: `/시즌생성`, `/시즌목록`, `/시즌시작`, `/시즌종료`, `/시즌취소`, `/시즌재집계`, `/시즌랭킹`, `/간부인사미리보기`, `/간부인사실행`
+- 보존되는 데이터: `seasons`, `season_member_stats`, `officer_reviews`, `officer_role_change_logs`
+- 계속 사용 가능한 기능: 기존 업적 조회, 칭호 조회, 칭호 장착/해제, 사용자 프로필
+- 활성화 방법: staging guild에서 검증한 뒤 `.env`에 `ENABLE_SEASONS=true`를 설정하고 봇을 재시작합니다.
 
-- 세션이 `OPEN`인 상태에서 봇을 종료한다.
-- 마감 시각이 지난 뒤 봇을 다시 실행한다.
-- 재시작 복구 로그가 실행됐는지 확인한다.
-- 미체크 사용자만 `ABSENT` 처리됐는지 확인한다.
-- 같은 복구를 다시 실행해도 중복 결석과 중복 점수가 생기지 않는지 확인한다.
+## Achievements And Titles
 
-#### 세션 3: 관리자 정정 흐름
+일반 사용자 흐름:
 
-- 마감 후 `/내정보`로 총점, 출석률, 최근 점수 변화를 확인한다.
-- `/출석수정`으로 `ABSENT`를 `PRESENT`로 변경한다.
-- `score_events`에 정정 점수 `+6`이 추가됐는지 확인한다.
-- `audit_logs`에 `ATTENDANCE_CORRECTED` 기록이 생성됐는지 확인한다.
-- `/내정보` 통계와 최근 점수 변화가 정정 결과를 반영하는지 확인한다.
+1. `/업적안내`로 업적과 칭호 사용법을 확인합니다.
+2. `/내업적`으로 획득한 업적을 확인합니다.
+3. `/내칭호`로 보유 칭호와 현재 장착 칭호를 확인합니다.
+4. `/칭호장착`에서 자동완성으로 보유 칭호를 선택합니다.
+5. `/사용자프로필`로 공개 가능한 업적/칭호 요약을 확인합니다.
 
-확인 대상 테이블: `attendance_sessions`, `attendance_session_members`,
-`attendance_records`, `score_events`, `audit_logs`.
+관리자 흐름:
 
-### Phase 2: 사유 신청, 연속 출석, 랭킹, 자동 공지
+1. `/업적초기화`로 기본 업적 정의를 준비합니다.
+2. `/업적목록`에서 업적 코드와 보상 점수를 확인합니다.
+3. `/업적역할설정`으로 특정 업적과 Discord 역할을 연결합니다.
+4. `/업적역할목록`으로 현재 매핑을 확인합니다.
+5. 시즌 기능이 활성화된 서버에서만 `/업적평가`로 신규 업적 지급을 실행합니다.
 
-#### 세션 1: 사유 지각 흐름
+중요한 제약:
 
-- 출석 시작 전 `/사유신청`으로 오늘 날짜 사유를 신청한다.
-- 간부가 `/사유목록 전체조회:True 상태:대기`로 신청을 확인한다.
-- 간부가 `/사유승인`으로 신청을 승인한다.
-- 사용자가 지각 시간대에 `/출석`을 실행한다.
-- `attendance_records.status`가 `EXCUSED_LATE`인지 확인한다.
-- `score_events`의 해당 출석 점수가 `0`인지 확인한다.
-- `/내정보`와 `/출석현황`에 사유 지각이 반영되는지 확인한다.
+- 칭호는 한 번에 하나만 장착할 수 있습니다.
+- 칭호 장착/해제는 점수에 영향을 주지 않습니다.
+- 업적 보상 점수는 기존 점수 이벤트를 수정하지 않고 새 `ACHIEVEMENT_REWARD` 이벤트로 추가됩니다.
+- 역할 부여가 실패해도 업적 획득 자체는 취소하지 않습니다. Discord 역할 권한과 역할 계층을 확인하세요.
 
-#### 세션 2: 사유 결석 흐름
+## Testing
 
-- 출석 시작 전 `/사유신청`으로 오늘 날짜 사유를 신청한다.
-- 간부가 `/사유승인`으로 승인한다.
-- 사용자는 `/출석`을 실행하지 않는다.
-- 마감 후 `attendance_records.status`가 `EXCUSED_ABSENT`인지 확인한다.
-- `score_events`의 해당 결석 점수가 `-1`인지 확인한다.
+```powershell
+.\venv\Scripts\python.exe -m pytest -q --basetemp=.tmp_full -p no:cacheprovider
+.\venv\Scripts\python.exe -m compileall -q bot tests
+.\venv\Scripts\python.exe -m pip check
+```
 
-#### 세션 3: 취소와 거절 흐름
+현재 검증 결과:
 
-- 대기 중인 신청을 `/사유취소`로 취소할 수 있는지 확인한다.
-- 이미 출석 기록에 반영된 신청은 취소되지 않는지 확인한다.
-- 간부가 `/사유거절`을 실행하면 상태가 `REJECTED`로 바뀌는지 확인한다.
-- 일반 사용자가 전체 목록, 승인, 거절 명령을 사용할 수 없는지 확인한다.
+```text
+124 passed
+No broken requirements found.
+```
 
-#### 세션 4: 연속 출석과 랭킹
+## Operations Checklist
 
-- 같은 대원이 3회 연속 출석하면 `STREAK_BONUS` `+2`가 한 번만 생성되는지 확인한다.
-- 7회 연속 출석하면 `STREAK_BONUS` `+5`가 한 번만 생성되는지 확인한다.
-- 사유 결석은 연속 출석을 끊지 않지만 횟수는 올리지 않는지 확인한다.
-- 일반 결석은 연속 출석을 끊는지 확인한다.
-- `/랭킹`이 총점 내림차순, 연속 출석 내림차순, 이름순으로 표시되는지 확인한다.
+초기 운영:
 
-#### 세션 5: 자동 공지
+- Discord Developer Portal에서 Bot Token을 발급합니다.
+- Bot 권한에 `applications.commands`, 메시지 전송, 역할 관리 권한을 부여합니다.
+- Stage A 음성 검증을 사용할 경우 voice state intent를 활성화합니다.
+- `/초기설정` 실행 후 `/도움말 카테고리:시작하기`를 확인합니다.
+- `/대원등록`으로 출석 대상자를 등록합니다.
 
-- 출석 시작 시 announcement 채널에 시작 공지가 한 번만 올라오는지 확인한다.
-- 출석 마감 시 마감 공지가 한 번만 올라오는지 확인한다.
-- `attendance_sessions.start_announced_at`과 `close_announced_at`이 기록되는지 확인한다.
-## Phase 3 Manual Verification Checklist
+일일 운영:
 
-### Evaluation And Cancellation
+- 대원은 `/출석`으로 체크인합니다.
+- 운영자는 `/출석현황`으로 미체크 인원을 확인합니다.
+- 사유가 있으면 `/사유신청`, `/사유승인`, `/사유거절` 흐름을 사용합니다.
+- 잘못된 기록은 `/출석수정`으로 정정합니다.
 
-- Run `/평가` as an officer and apply a positive or negative score.
-- Confirm `score_events` has an `EVALUATION` row and `evaluations.score_event_id` points to it.
-- Confirm `audit_logs` has `EVALUATION_CREATED`.
-- Run `/평가취소` and confirm an `EVALUATION_REVERSAL` row is appended.
-- Confirm the original score event is not deleted or edited.
-- Re-run cancellation for the same evaluation and confirm no duplicate reversal is created.
+시즌 운영:
 
-### Manual Score And Reports
+- `/시즌생성`으로 시즌을 만들고 `/시즌시작`으로 활성화합니다.
+- 필요할 때 `/시즌재집계`로 Stage A/B 반영 통계를 다시 계산합니다.
+- `/업적초기화`, `/업적역할설정`, `/업적평가`로 업적 보상을 관리합니다.
+- `/간부인사미리보기`로 먼저 확인하고, 서버 관리자만 `/간부인사실행`을 수행합니다.
 
-- Run `/점수조정` with a nonzero delta.
-- Confirm `score_events` has a `MANUAL_ADJUSTMENT` row and `audit_logs` has `SCORE_ADJUSTED`.
-- Run `/리포트` and confirm score, rank, attendance rate, current streak, recent score events, and recent active evaluations are shown.
-- Confirm excuse request text, audit JSON, cancellation reasons, secrets, and stack traces are not shown in public reports.
+안전 원칙:
 
-### Weekly Report
+- Preview 명령은 Discord 역할을 변경하지 않습니다.
+- 역할 변경 결과는 `officer_role_change_logs`에 남습니다.
+- 서버 소유자와 관리자 계정은 간부 인사 보호 대상으로 취급됩니다.
+- 기존 점수 이벤트는 수정하지 않고 새 보정 이벤트를 추가합니다.
 
-- Prepare multiple attendance sessions plus evaluation and manual score events.
-- Run `/주간보고` and compare the result with DB rows for the guild-local Monday-to-Sunday range.
-- Confirm `CANCELLED` sessions are excluded from attendance-rate denominators.
-- Confirm weekly score deltas include attendance, correction, streak, evaluation, and manual adjustment events.
+## English Summary
 
-### Settings
+Discord Attendance Bot is a community operations bot built with `discord.py` and SQLite.
 
-- Run `/설정조회` and confirm timezone, attendance days, times, role, channel IDs, and excuse mode.
-- Run `/설정변경` for time fields and confirm `start < late < close` validation.
-- Run `/설정변경` for days, timezone, excuse mode, role ID, and channel IDs.
-- Confirm `audit_logs` has `GUILD_SETTINGS_UPDATED`.
-- Confirm already-created attendance records are not changed by settings updates.
+It supports:
 
-### Today Session Cancel And Resume
+- Guild setup and member registration
+- Daily attendance sessions and check-ins
+- Excuse requests and officer approvals
+- Score ledger and rank calculation
+- Public/personal/weekly reports
+- Voice attendance verification
+- Late reduction and absence exemption
+- Seasons, achievements, titles, and achievement role rewards
+- Officer review preview and audited role execution
 
-- With today's session in `SCHEDULED` or `OPEN`, run `/오늘출석취소`.
-- Confirm the session becomes `CANCELLED` and existing attendance records remain.
-- Confirm attendance score events are compensated by `SESSION_CANCEL_REVERSAL` events.
-- Confirm reports exclude the cancelled session from attendance-rate calculations.
-- Run `/오늘출석재개` and confirm the session returns to `SCHEDULED` or `OPEN`.
-- Confirm cancelled points are restored by `SESSION_RESUME_RESTORE` events.
-
-### SQLite Backup
-
-- Confirm the backup scheduler creates `data/backups/attendance-YYYYMMDD-HHMMSS.db`.
-- Run `PRAGMA integrity_check` against the backup and confirm `ok`.
-- Confirm WAL-mode recent data is included in the backup.
-- Confirm retention pruning removes only old `attendance-*.db` backup files, never the live DB.
+Run `/help` equivalent command `/도움말` in Discord to see category-based usage, parameters, and permissions. The project keeps score history append-only and applies Discord role changes only after database state is committed.
