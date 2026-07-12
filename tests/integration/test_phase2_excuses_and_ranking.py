@@ -164,13 +164,13 @@ async def test_approved_excuse_turns_late_check_in_into_excused_late(
         target_date="2026-07-02",
         expected_time="21:42",
         reason="업무 일정",
-        now=utc_dt(2, 12, 0),
+        now=utc_dt(1, 13, 0),
     )
     approved = await excuse_service.approve_request(
         guild_id=GUILD_ID,
         excuse_request_id=created.request["id"],
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(2, 12, 5),
+        now=utc_dt(1, 13, 5),
     )
     result = await attendance_service.check_in(
         guild_id=GUILD_ID,
@@ -220,13 +220,13 @@ async def test_approved_excuse_turns_auto_absent_into_excused_absent(
         target_date="2026-07-02",
         expected_time=None,
         reason="외부 일정",
-        now=utc_dt(2, 12, 0),
+        now=utc_dt(1, 13, 0),
     )
     await excuse_service.approve_request(
         guild_id=GUILD_ID,
         excuse_request_id=created.request["id"],
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(2, 12, 5),
+        now=utc_dt(1, 13, 5),
     )
     prepared = await session_service.prepare_today_session(
         guild_id=GUILD_ID,

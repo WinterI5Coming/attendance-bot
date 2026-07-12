@@ -1,7 +1,7 @@
-"""Business rules for excuse requests and approvals."""
+"""사유 신청과 승인 흐름의 비즈니스 규칙을 담당한다."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import json
 import logging
@@ -17,6 +17,7 @@ from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
+from bot.services.excuse_policy import EXCUSE_TYPE_LABELS, ExcusePolicyService
 from bot.utils.time_utils import (
     build_session_window,
     get_server_today,
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class ExcuseStatus(Enum):
-    """Expected outcomes for excuse commands."""
+    """사유 명령에서 예상되는 처리 결과."""
 
     CREATED_PENDING = "CREATED_PENDING"
     CREATED_AUTO_APPROVED = "CREATED_AUTO_APPROVED"
@@ -52,20 +53,23 @@ class ExcuseStatus(Enum):
     ALREADY_DECIDED = "ALREADY_DECIDED"
     ALREADY_APPLIED = "ALREADY_APPLIED"
     NOT_CONFIGURED = "NOT_CONFIGURED"
+    ADMIN_OVERRIDE_CREATED = "ADMIN_OVERRIDE_CREATED"
+    POLICY_UPDATED = "POLICY_UPDATED"
 
 
 @dataclass(frozen=True)
 class ExcuseResult:
-    """Result returned by excuse service methods."""
+    """사유 서비스 메서드가 반환하는 결과."""
 
     status: ExcuseStatus
     request: dict[str, Any] | None = None
     attendance_record: dict[str, Any] | None = None
     score_delta: int = 0
+    deadline_at: datetime | None = None
 
 
 class ExcuseService:
-    """Validate and mutate excuse requests."""
+    """사유 신청을 검증하고 상태를 변경한다."""
 
     def __init__(
         self,
@@ -78,7 +82,7 @@ class ExcuseService:
         excuse_repository: ExcuseRepository,
         audit_repository: AuditRepository,
     ) -> None:
-        """Create the service."""
+        """서비스 의존성을 초기화한다."""
 
         self.guild_repository = guild_repository
         self.member_repository = member_repository
@@ -87,6 +91,7 @@ class ExcuseService:
         self.score_repository = score_repository
         self.excuse_repository = excuse_repository
         self.audit_repository = audit_repository
+        self.policy_service = ExcusePolicyService()
 
     async def create_request(
         self,
@@ -97,8 +102,9 @@ class ExcuseService:
         expected_time: str | None,
         reason: str,
         now: datetime,
+        excuse_type: str = "ABSENCE",
     ) -> ExcuseResult:
-        """Create an excuse request for an active member."""
+        """활성 멤버의 사유 신청을 생성한다."""
 
         self._require_aware(now)
         guild_id_text = str(guild_id)
@@ -126,6 +132,10 @@ class ExcuseService:
         ):
             return ExcuseResult(status=ExcuseStatus.NOT_ATTENDANCE_DAY)
 
+        normalized_type = excuse_type.strip().upper()
+        if normalized_type not in EXCUSE_TYPE_LABELS:
+            return ExcuseResult(status=ExcuseStatus.INVALID_STATUS)
+
         if expected_time:
             try:
                 parse_hhmm(expected_time)
@@ -136,15 +146,17 @@ class ExcuseService:
         if len(cleaned_reason) < 2 or len(cleaned_reason) > 500:
             return ExcuseResult(status=ExcuseStatus.INVALID_REASON)
 
-        window = build_session_window(
-            attendance_date=parsed_date,
-            attendance_start=settings["attendance_start"],
-            late_deadline=settings["late_deadline"],
-            close_deadline=settings["close_deadline"],
-            timezone_name=settings["timezone"],
+        policy = self.policy_service.from_settings(settings)
+        can_submit, deadline_at = self.policy_service.can_submit(
+            now=now,
+            target_date=parsed_date,
+            policy=policy,
         )
-        if now >= window.start_at:
-            return ExcuseResult(status=ExcuseStatus.TOO_LATE_TO_REQUEST)
+        if not can_submit and not policy.allow_late_request:
+            return ExcuseResult(
+                status=ExcuseStatus.TOO_LATE_TO_REQUEST,
+                deadline_at=deadline_at,
+            )
 
         existing_session = await self.session_repository.get_by_guild_and_date(
             guild_id=guild_id_text,
@@ -167,20 +179,21 @@ class ExcuseService:
         if duplicate is not None:
             return ExcuseResult(status=ExcuseStatus.DUPLICATE_ACTIVE_REQUEST)
 
-        status = (
-            "AUTO_APPROVED"
-            if settings["excuse_mode"] == "auto"
-            else "PENDING"
-        )
+        status = "PENDING" if policy.require_admin_approval else "AUTO_APPROVED"
         try:
             request = await self.excuse_repository.create(
                 guild_id=guild_id_text,
                 member_id=int(member["id"]),
                 target_date=target_date,
+                excuse_type=normalized_type,
                 reason=cleaned_reason,
                 expected_time=expected_time,
                 status=status,
                 requested_at=now.isoformat(),
+                deadline_at=deadline_at.astimezone(timezone.utc).isoformat(),
+                attendance_session_id=(
+                    None if existing_session is None else int(existing_session["id"])
+                ),
             )
         except aiosqlite.IntegrityError:
             return ExcuseResult(status=ExcuseStatus.DUPLICATE_ACTIVE_REQUEST)
@@ -199,7 +212,169 @@ class ExcuseService:
                 else ExcuseStatus.CREATED_PENDING
             ),
             request=request,
+            deadline_at=deadline_at,
         )
+
+    async def create_admin_override(
+        self,
+        *,
+        guild_id: int | str,
+        target_discord_id: int | str,
+        actor_discord_id: int | str,
+        target_date: str,
+        excuse_type: str,
+        reason: str,
+        admin_note: str,
+        now: datetime,
+    ) -> ExcuseResult:
+        """Create an admin-only late exception as an approved request."""
+
+        self._require_aware(now)
+        guild_id_text = str(guild_id)
+        settings = await self.guild_repository.get_by_guild_id(guild_id_text)
+        if settings is None:
+            return ExcuseResult(status=ExcuseStatus.NOT_CONFIGURED)
+
+        member = await self.member_repository.get_by_discord_id(
+            guild_id=guild_id_text,
+            discord_id=str(target_discord_id),
+        )
+        if member is None or not member["is_active"]:
+            return ExcuseResult(status=ExcuseStatus.NOT_REGISTERED)
+
+        parsed_date = self._parse_date(target_date)
+        if parsed_date is None:
+            return ExcuseResult(status=ExcuseStatus.INVALID_DATE)
+        normalized_type = excuse_type.strip().upper()
+        if normalized_type not in EXCUSE_TYPE_LABELS:
+            return ExcuseResult(status=ExcuseStatus.INVALID_STATUS)
+
+        policy = self.policy_service.from_settings(settings)
+        _, deadline_at = self.policy_service.can_submit(
+            now=now,
+            target_date=parsed_date,
+            policy=policy,
+        )
+        request = await self.excuse_repository.create(
+            guild_id=guild_id_text,
+            member_id=int(member["id"]),
+            target_date=target_date,
+            excuse_type=normalized_type,
+            reason=reason.strip(),
+            expected_time=None,
+            status="APPROVED",
+            requested_at=now.isoformat(),
+            deadline_at=deadline_at.astimezone(timezone.utc).isoformat(),
+            is_admin_override=True,
+            approval_type="ADMIN_OVERRIDE",
+            decided_by_discord_id=str(actor_discord_id),
+            decided_at=now.isoformat(),
+            processed_by=str(actor_discord_id),
+            processed_at=now.isoformat(),
+            admin_note=admin_note.strip(),
+        )
+
+        connection = await self.excuse_repository.database.connect()
+        try:
+            await self.audit_repository.create_log(
+                guild_id=guild_id_text,
+                actor_discord_id=str(actor_discord_id),
+                action_type="EXCUSE_ADMIN_OVERRIDE",
+                target_type="EXCUSE_REQUEST",
+                target_id=str(request["id"]),
+                before_json=None,
+                after_json=json.dumps(
+                    {
+                        "status": "APPROVED",
+                        "excuse_type": normalized_type,
+                        "deadline_at": deadline_at.isoformat(),
+                    }
+                ),
+                reason=admin_note.strip() or "관리자 예외 등록",
+                created_at=now.isoformat(),
+                connection=connection,
+            )
+            await connection.commit()
+        finally:
+            await connection.close()
+
+        updated = await self.excuse_repository.get_by_id(
+            excuse_request_id=int(request["id"])
+        )
+        return ExcuseResult(
+            status=ExcuseStatus.ADMIN_OVERRIDE_CREATED,
+            request=updated,
+            deadline_at=deadline_at,
+        )
+
+    async def update_policy(
+        self,
+        *,
+        guild_id: int | str,
+        actor_discord_id: int | str,
+        deadline_time: str,
+        deadline_days_before: int,
+        now: datetime,
+    ) -> ExcuseResult:
+        """Update excuse deadline policy for a guild."""
+
+        self._require_aware(now)
+        try:
+            parse_hhmm(deadline_time)
+        except ValueError:
+            return ExcuseResult(status=ExcuseStatus.INVALID_TIME)
+        if deadline_days_before < 0:
+            return ExcuseResult(status=ExcuseStatus.INVALID_DATE)
+
+        guild_id_text = str(guild_id)
+        before = await self.guild_repository.get_by_guild_id(guild_id_text)
+        if before is None:
+            return ExcuseResult(status=ExcuseStatus.NOT_CONFIGURED)
+
+        connection = await self.excuse_repository.database.connect()
+        try:
+            await connection.execute("BEGIN IMMEDIATE;")
+            await self.excuse_repository.update_policy(
+                guild_id=guild_id_text,
+                deadline_time=deadline_time,
+                deadline_days_before=deadline_days_before,
+                actor_discord_id=str(actor_discord_id),
+                now=now.isoformat(),
+                connection=connection,
+            )
+            await self.audit_repository.create_log(
+                guild_id=guild_id_text,
+                actor_discord_id=str(actor_discord_id),
+                action_type="EXCUSE_POLICY_UPDATED",
+                target_type="GUILD_SETTINGS",
+                target_id=guild_id_text,
+                before_json=json.dumps(
+                    {
+                        "excuse_deadline_time": before["excuse_deadline_time"],
+                        "excuse_deadline_days_before": before[
+                            "excuse_deadline_days_before"
+                        ],
+                    }
+                ),
+                after_json=json.dumps(
+                    {
+                        "excuse_deadline_time": deadline_time,
+                        "excuse_deadline_days_before": deadline_days_before,
+                    }
+                ),
+                reason="사유 신청 정책 변경",
+                created_at=now.isoformat(),
+                connection=connection,
+            )
+            await connection.commit()
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
+        updated = await self.guild_repository.get_by_guild_id(guild_id_text)
+        return ExcuseResult(status=ExcuseStatus.POLICY_UPDATED, request=updated)
 
     async def cancel_request(
         self,
@@ -209,7 +384,7 @@ class ExcuseService:
         excuse_request_id: int,
         now: datetime,
     ) -> ExcuseResult:
-        """Cancel the caller's active excuse request."""
+        """호출자의 활성 사유 신청을 취소한다."""
 
         self._require_aware(now)
         request = await self.excuse_repository.get_by_id(
@@ -225,7 +400,7 @@ class ExcuseService:
         if member is None or int(member["id"]) != int(request["member_id"]):
             return ExcuseResult(status=ExcuseStatus.NOT_OWNER)
 
-        if request["status"] not in {"PENDING", "APPROVED", "AUTO_APPROVED"}:
+        if request["status"] != "PENDING":
             return ExcuseResult(status=ExcuseStatus.INVALID_STATUS)
 
         applied = await self._is_request_applied(
@@ -274,7 +449,7 @@ class ExcuseService:
         actor_discord_id: int | str,
         now: datetime,
     ) -> ExcuseResult:
-        """Approve a pending excuse request and reconcile existing attendance."""
+        """대기 중인 사유 신청을 승인하고 기존 출석 기록을 보정한다."""
 
         return await self._decide_request(
             guild_id=str(guild_id),
@@ -294,7 +469,7 @@ class ExcuseService:
         rejection_reason: str,
         now: datetime,
     ) -> ExcuseResult:
-        """Reject a pending excuse request."""
+        """대기 중인 사유 신청을 거절한다."""
 
         reason = rejection_reason.strip()
         if len(reason) < 2 or len(reason) > 500:
@@ -317,7 +492,7 @@ class ExcuseService:
         include_all: bool,
         can_view_all: bool,
     ) -> ExcuseResult:
-        """List excuse requests visible to a user."""
+        """사용자에게 보이는 사유 신청 목록을 조회한다."""
 
         member = await self.member_repository.get_by_discord_id(
             guild_id=str(guild_id),
@@ -350,6 +525,8 @@ class ExcuseService:
         approve: bool,
         rejection_reason: str | None,
     ) -> ExcuseResult:
+        """사유 신청 승인 또는 거절을 하나의 트랜잭션으로 처리한다."""
+
         self._require_aware(now)
         connection = await self.excuse_repository.database.connect()
         try:
@@ -439,6 +616,8 @@ class ExcuseService:
         now: datetime,
         connection: aiosqlite.Connection,
     ) -> dict[str, Any]:
+        """승인된 사유를 기존 출석 기록과 점수에 반영한다."""
+
         session = await self.session_repository.get_by_guild_and_date(
             guild_id=request["guild_id"],
             attendance_date=request["target_date"],
@@ -511,6 +690,8 @@ class ExcuseService:
         return {"record": record, "delta": delta}
 
     async def _is_request_applied(self, *, excuse_request_id: int) -> bool:
+        """사유 신청이 이미 출석 기록에 연결되었는지 확인한다."""
+
         connection = await self.excuse_repository.database.connect()
         try:
             rows = await connection.execute_fetchall(
@@ -527,11 +708,15 @@ class ExcuseService:
             await connection.close()
 
     def _parse_date(self, value: str):
+        """YYYY-MM-DD 문자열을 date 객체로 변환하고 실패하면 None을 반환한다."""
+
         try:
             return datetime.strptime(value, "%Y-%m-%d").date()
         except ValueError:
             return None
 
     def _require_aware(self, value: datetime) -> None:
+        """timezone-aware datetime인지 검증한다."""
+
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("now must be a timezone-aware datetime.")
