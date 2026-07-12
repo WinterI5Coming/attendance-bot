@@ -1,4 +1,4 @@
-"""Attendance classification and check-in business rules."""
+"""출석 시간 판정과 체크인 비즈니스 규칙을 담당한다."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class AttendanceTimeResult(Enum):
-    """Result of comparing a time against an attendance session window.
+    """현재 시각을 출석 세션 시간 범위와 비교한 결과.
 
     Values:
         NOT_OPEN: The current time is before the session start.
@@ -49,7 +49,7 @@ class AttendanceTimeResult(Enum):
 
 
 def _require_aware_datetime(value: datetime, name: str) -> None:
-    """Validate that a datetime includes usable timezone information.
+    """datetime 값에 사용할 수 있는 시간대 정보가 있는지 검증한다.
 
     Args:
         value: Datetime to validate.
@@ -69,7 +69,7 @@ def classify_attendance(
     late_at: datetime,
     close_at: datetime,
 ) -> AttendanceTimeResult:
-    """Classify the current time against an attendance session window.
+    """현재 시각이 출석 세션 시간 범위에서 어느 구간인지 분류한다.
 
     Args:
         now: Time to classify. It must be timezone-aware and is supplied by
@@ -97,8 +97,8 @@ def classify_attendance(
     if not start_at < late_at < close_at:
         raise ValueError("Attendance window must satisfy start_at < late_at < close_at.")
 
-    # Python compares aware datetimes by absolute instant, so callers may pass
-    # different timezone objects without normalizing them first.
+    # 파이썬의 timezone-aware datetime 비교는 절대 시각 기준으로 동작하므로,
+    # 호출자가 서로 다른 timezone 객체를 넘겨도 먼저 정규화할 필요가 없다.
     if now < start_at:
         return AttendanceTimeResult.NOT_OPEN
 
@@ -112,7 +112,7 @@ def classify_attendance(
 
 
 class AttendanceCheckInStatus(Enum):
-    """Possible outcomes of a user check-in attempt."""
+    """사용자 출석 체크인 시도에서 가능한 결과."""
 
     PRESENT = "PRESENT"
     LATE = "LATE"
@@ -129,7 +129,7 @@ class AttendanceCheckInStatus(Enum):
 
 
 class AttendanceCorrectionStatus(Enum):
-    """Possible outcomes for an administrator attendance correction."""
+    """관리자 출석 정정에서 가능한 결과."""
 
     UPDATED = "UPDATED"
     CREATED = "CREATED"
@@ -145,7 +145,7 @@ class AttendanceCorrectionStatus(Enum):
 
 @dataclass(frozen=True)
 class AttendanceCheckInResult:
-    """Result returned after attempting a user check-in.
+    """사용자 체크인 시도 후 반환되는 결과.
 
     Attributes:
         status: Operational result for the command.
@@ -179,7 +179,7 @@ class AttendanceCheckInResult:
 
 @dataclass(frozen=True)
 class AttendanceCorrectionResult:
-    """Result of an administrator attendance correction."""
+    """관리자 출석 정정 결과."""
 
     status: AttendanceCorrectionStatus
     target_discord_id: str | None = None
@@ -192,7 +192,7 @@ class AttendanceCorrectionResult:
 
 @dataclass(frozen=True)
 class AttendanceStatusMember:
-    """One member row in today's attendance status report."""
+    """오늘 출석 현황에 표시되는 멤버 한 명의 행."""
 
     member_id: int
     discord_id: str
@@ -204,7 +204,7 @@ class AttendanceStatusMember:
 
 @dataclass(frozen=True)
 class AttendanceStatusResult:
-    """Current session attendance status grouped by stored outcome.
+    """저장된 출석 결과별로 묶은 현재 세션 출석 현황.
 
     Attributes:
         status: Session preparation status.
@@ -234,7 +234,7 @@ class AttendanceStatusResult:
 
     @property
     def total_count(self) -> int:
-        """Return the number of members in the session snapshot."""
+        """세션 스냅샷에 포함된 멤버 수를 반환한다."""
 
         return (
             len(self.present)
@@ -247,13 +247,13 @@ class AttendanceStatusResult:
 
     @property
     def checked_count(self) -> int:
-        """Return the number of members with any attendance record."""
+        """출석 기록이 하나라도 있는 멤버 수를 반환한다."""
 
         return self.total_count - len(self.unchecked)
 
 
 class AttendanceService:
-    """Handle user check-ins and attendance status lookups."""
+    """사용자 체크인과 출석 현황 조회를 처리한다."""
 
     def __init__(
         self,
@@ -267,8 +267,9 @@ class AttendanceService:
         audit_repository: AuditRepository | None = None,
         excuse_repository: ExcuseRepository | None = None,
         streak_service: StreakService | None = None,
+        voice_verification_service: Any | None = None,
     ) -> None:
-        """Create the service.
+        """서비스 의존성을 초기화한다.
 
         Args:
             member_repository: Repository for member identity and active state.
@@ -289,6 +290,7 @@ class AttendanceService:
         self.audit_repository = audit_repository
         self.excuse_repository = excuse_repository
         self.streak_service = streak_service
+        self.voice_verification_service = voice_verification_service
 
     async def check_in(
         self,
@@ -296,8 +298,9 @@ class AttendanceService:
         guild_id: int | str,
         discord_id: int | str,
         now: datetime,
+        current_voice_channel_id: int | str | None = None,
     ) -> AttendanceCheckInResult:
-        """Check a registered member into today's attendance session.
+        """등록된 멤버를 오늘 출석 세션에 체크인한다.
 
         Args:
             guild_id: Discord guild ID.
@@ -422,6 +425,11 @@ class AttendanceService:
             excuse_request_id=excuse_request_id,
             checked_at=now.isoformat(),
             timezone_name=prepared.timezone_name,
+            current_voice_channel_id=(
+                None
+                if current_voice_channel_id is None
+                else str(current_voice_channel_id)
+            ),
         )
 
     async def get_today_status(
@@ -430,7 +438,7 @@ class AttendanceService:
         guild_id: int | str,
         now: datetime,
     ) -> AttendanceStatusResult:
-        """Return today's attendance snapshot grouped by outcome.
+        """오늘 출석 스냅샷을 결과별로 묶어 반환한다.
 
         Args:
             guild_id: Discord guild ID.
@@ -510,7 +518,7 @@ class AttendanceService:
         actor_discord_id: int | str,
         now: datetime,
     ) -> AttendanceCorrectionResult:
-        """Create or update an attendance record as an administrator correction.
+        """관리자 정정으로 출석 기록을 생성하거나 갱신한다.
 
         Args:
             guild_id: Discord guild ID.
@@ -633,8 +641,9 @@ class AttendanceService:
         excuse_request_id: int | None,
         checked_at: str,
         timezone_name: str | None,
+        current_voice_channel_id: str | None = None,
     ) -> AttendanceCheckInResult:
-        """Create attendance and score rows in one transaction.
+        """출석 기록과 점수 행을 하나의 트랜잭션으로 생성한다.
 
         Args:
             guild_id: Discord guild ID stored as text.
@@ -703,6 +712,15 @@ class AttendanceService:
                     connection=connection,
                 )
                 assert record is not None
+            if self.voice_verification_service is not None:
+                await self.voice_verification_service.create_for_attendance_record(
+                    guild_id=guild_id,
+                    session=session,
+                    attendance_record=record,
+                    checked_at=checked_at,
+                    current_voice_channel_id=current_voice_channel_id,
+                    connection=connection,
+                )
             score_delta = get_attendance_score(attendance_status)
             descriptions = {
                 "PRESENT": "정상 출석",
@@ -711,9 +729,8 @@ class AttendanceService:
             }
             description = descriptions[attendance_status]
 
-            # Attendance and score must be atomic: the command should never
-            # leave a checked-in member without points, or points without the
-            # attendance record that explains them.
+            # 출석 기록과 점수 이벤트는 항상 함께 커밋되어야 한다.
+            # 출석만 있고 점수가 없거나, 점수만 있고 근거 출석이 없는 상태를 막는다.
             await self.score_repository.create_attendance_event(
                 guild_id=guild_id,
                 member_id=member_id,
@@ -811,7 +828,7 @@ class AttendanceService:
         actor_discord_id: str,
         now: datetime,
     ) -> AttendanceCorrectionResult:
-        """Apply correction rows in one transaction."""
+        """정정 관련 행을 하나의 트랜잭션으로 반영한다."""
 
         assert self.audit_repository is not None
         now_text = now.isoformat()
@@ -908,9 +925,8 @@ class AttendanceService:
                     connection=connection,
                 )
 
-            # Attendance correction, score compensation, and audit evidence
-            # must commit together so administrators never create invisible or
-            # partially compensated changes.
+            # 출석 정정, 점수 보정, 감사 로그는 함께 커밋되어야 한다.
+            # 관리자 작업이 보이지 않거나 일부만 보상된 상태로 남지 않게 한다.
             await self.audit_repository.create_log(
                 guild_id=guild_id,
                 actor_discord_id=actor_discord_id,
@@ -957,7 +973,7 @@ class AttendanceService:
         self,
         prepared: Any,
     ) -> AttendanceCheckInResult:
-        """Translate session preparation status into check-in status.
+        """세션 준비 상태를 체크인 상태로 변환한다.
 
         Args:
             prepared: ``SessionPrepareResult`` returned by SessionService.

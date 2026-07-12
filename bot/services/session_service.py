@@ -1,7 +1,7 @@
-"""Business rules for preparing today's attendance session."""
+"""오늘 출석 세션 준비와 마감 비즈니스 규칙을 담당한다."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import logging
 from typing import Any
@@ -15,19 +15,27 @@ from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
+from bot.repositories.stage_a_repository import StageARepository
 from bot.utils.time_utils import (
     build_session_window,
     get_server_today,
     get_weekday_code,
     parse_attendance_days,
+    parse_hhmm,
 )
+
+
+DEFAULT_VERIFICATION_END_TIME = "23:00"
+DEFAULT_REQUIRED_VOICE_MINUTES = 60
+DEFAULT_EARLY_LEAVE_PENALTY = -1
+DEFAULT_NO_PARTICIPATION_PENALTY = -2
 
 
 logger = logging.getLogger(__name__)
 
 
 class SessionPrepareStatus(Enum):
-    """Possible outcomes for preparing today's attendance session."""
+    """오늘 출석 세션 준비에서 가능한 결과."""
 
     READY = "READY"
     NOT_CONFIGURED = "NOT_CONFIGURED"
@@ -38,7 +46,7 @@ class SessionPrepareStatus(Enum):
 
 
 class SessionCloseStatus(Enum):
-    """Possible outcomes for closing an attendance session."""
+    """출석 세션 마감에서 가능한 결과."""
 
     CLOSED = "CLOSED"
     ALREADY_CLOSED = "ALREADY_CLOSED"
@@ -48,7 +56,7 @@ class SessionCloseStatus(Enum):
 
 @dataclass(frozen=True)
 class SessionPrepareResult:
-    """Result of preparing a guild's attendance session for today.
+    """서버의 오늘 출석 세션 준비 결과.
 
     Attributes:
         status: Operational outcome. Expected states are represented here
@@ -68,7 +76,7 @@ class SessionPrepareResult:
 
 @dataclass(frozen=True)
 class SessionCloseResult:
-    """Result of attempting to close one session.
+    """세션 하나의 마감 시도 결과.
 
     Attributes:
         status: Close outcome.
@@ -89,7 +97,7 @@ class SessionCloseResult:
 
 @dataclass(frozen=True)
 class RecoveryResult:
-    """Summary of processing overdue sessions after restart or scheduler ticks."""
+    """재시작 또는 스케줄러 실행 후 지연 세션 처리 요약."""
 
     processed_sessions: int = 0
     newly_absent_count: int = 0
@@ -99,7 +107,7 @@ class RecoveryResult:
 
 
 class SessionService:
-    """Prepare attendance sessions using guild settings and active members."""
+    """서버 설정과 활성 멤버를 사용해 출석 세션을 준비한다."""
 
     def __init__(
         self,
@@ -110,8 +118,9 @@ class SessionService:
         attendance_repository: AttendanceRepository | None = None,
         score_repository: ScoreRepository | None = None,
         excuse_repository: ExcuseRepository | None = None,
+        stage_a_repository: StageARepository | None = None,
     ) -> None:
-        """Create the service.
+        """서비스 의존성을 초기화한다.
 
         Args:
             guild_repository: Repository for ``guild_settings``.
@@ -129,6 +138,7 @@ class SessionService:
         self.attendance_repository = attendance_repository
         self.score_repository = score_repository
         self.excuse_repository = excuse_repository
+        self.stage_a_repository = stage_a_repository
 
     async def prepare_today_session(
         self,
@@ -136,7 +146,7 @@ class SessionService:
         guild_id: int | str,
         now: datetime,
     ) -> SessionPrepareResult:
-        """Fetch or create today's attendance session for a guild.
+        """서버의 오늘 출석 세션을 조회하거나 생성한다.
 
         Args:
             guild_id: Discord guild ID.
@@ -177,8 +187,14 @@ class SessionService:
                 attendance_date=attendance_date,
             )
 
-        attendance_days = parse_attendance_days(settings["attendance_days"])
-        if get_weekday_code(local_date) not in attendance_days:
+        policy = await self._resolve_attendance_policy(
+            guild_id=guild_id_text,
+            settings=settings,
+            attendance_date=attendance_date,
+            local_date=local_date,
+        )
+
+        if not policy["attendance_enabled"]:
             return SessionPrepareResult(
                 status=SessionPrepareStatus.NOT_ATTENDANCE_DAY,
                 timezone_name=timezone_name,
@@ -187,9 +203,14 @@ class SessionService:
 
         window = build_session_window(
             attendance_date=local_date,
-            attendance_start=settings["attendance_start"],
-            late_deadline=settings["late_deadline"],
-            close_deadline=settings["close_deadline"],
+            attendance_start=policy["start_time"],
+            late_deadline=policy["late_time"],
+            close_deadline=policy["close_time"],
+            timezone_name=timezone_name,
+        )
+        verification_end_at = self._build_policy_time(
+            attendance_date=local_date,
+            hhmm=policy["verification_end_time"],
             timezone_name=timezone_name,
         )
 
@@ -221,6 +242,10 @@ class SessionService:
                 start_at=window.start_at.isoformat(),
                 late_at=window.late_at.isoformat(),
                 close_at=window.close_at.isoformat(),
+                verification_end_at=verification_end_at.isoformat(),
+                required_voice_seconds=policy["required_voice_minutes"] * 60,
+                early_leave_penalty=policy["early_leave_penalty"],
+                no_participation_penalty=policy["no_participation_penalty"],
                 status=status,
                 opened_at=now_text if status == "OPEN" else None,
                 member_ids=[
@@ -230,9 +255,9 @@ class SessionService:
                 now=now_text,
             )
         except aiosqlite.IntegrityError:
-            # Concurrent /출석 calls can both try to create today's session.
-            # UNIQUE(guild_id, attendance_date) lets the first request win;
-            # the loser rolls back and returns the session that already exists.
+            # 동시에 들어온 /출석 호출이 오늘 세션 생성을 함께 시도할 수 있다.
+            # 고유 제약(UNIQUE(guild_id, attendance_date))으로 먼저 도착한 요청만 성공하고,
+            # 늦은 요청은 롤백한 뒤 이미 만들어진 세션을 다시 조회한다.
             logger.info(
                 "Concurrent attendance session creation recovered: guild_id=%s date=%s",
                 guild_id_text,
@@ -252,13 +277,98 @@ class SessionService:
             attendance_date=attendance_date,
         )
 
+    async def _resolve_attendance_policy(
+        self,
+        *,
+        guild_id: str,
+        settings: dict[str, Any],
+        attendance_date: str,
+        local_date,
+    ) -> dict[str, Any]:
+        """새 세션에 저장할 정책 스냅샷을 결정한다.
+
+        Date overrides win first, then weekday/weekend policies, then legacy
+        guild settings. Voice verification is disabled by default so existing
+        guild behavior remains exactly as it was until an administrator enables
+        it and configures voice channels.
+        """
+
+        if self.stage_a_repository is not None:
+            override = await self.stage_a_repository.get_date_override(
+                guild_id=guild_id,
+                attendance_date=attendance_date,
+            )
+            if override is not None:
+                return {
+                    "attendance_enabled": bool(override["enabled"]),
+                    "voice_enabled": bool(settings["voice_verification_enabled"]),
+                    "start_time": override["start_time"],
+                    "late_time": override["late_time"],
+                    "close_time": override["close_time"],
+                    "verification_end_time": override["verification_end_time"],
+                    "required_voice_minutes": int(override["required_voice_minutes"]),
+                    "early_leave_penalty": DEFAULT_EARLY_LEAVE_PENALTY,
+                    "no_participation_penalty": DEFAULT_NO_PARTICIPATION_PENALTY,
+                }
+
+            policy_type = "WEEKEND" if local_date.weekday() >= 5 else "WEEKDAY"
+            policy = await self.stage_a_repository.get_policy(
+                guild_id=guild_id,
+                policy_type=policy_type,
+            )
+            if policy is not None:
+                return {
+                    "attendance_enabled": bool(policy["enabled"]),
+                    "voice_enabled": bool(settings["voice_verification_enabled"]),
+                    "start_time": policy["start_time"],
+                    "late_time": policy["late_time"],
+                    "close_time": policy["close_time"],
+                    "verification_end_time": policy["verification_end_time"],
+                    "required_voice_minutes": int(policy["required_voice_minutes"]),
+                    "early_leave_penalty": int(policy["early_leave_penalty"]),
+                    "no_participation_penalty": int(policy["no_participation_penalty"]),
+                }
+
+        attendance_days = parse_attendance_days(settings["attendance_days"])
+        return {
+            "attendance_enabled": get_weekday_code(local_date) in attendance_days,
+            "voice_enabled": bool(settings.get("voice_verification_enabled", 0)),
+            "start_time": settings["attendance_start"],
+            "late_time": settings["late_deadline"],
+            "close_time": settings["close_deadline"],
+            "verification_end_time": DEFAULT_VERIFICATION_END_TIME,
+            "required_voice_minutes": DEFAULT_REQUIRED_VOICE_MINUTES,
+            "early_leave_penalty": DEFAULT_EARLY_LEAVE_PENALTY,
+            "no_participation_penalty": DEFAULT_NO_PARTICIPATION_PENALTY,
+        }
+
+    def _build_policy_time(
+        self,
+        *,
+        attendance_date,
+        hhmm: str,
+        timezone_name: str,
+    ) -> datetime:
+        """서버 로컬 정책 시각으로 UTC 타임스탬프 하나를 만든다."""
+
+        from datetime import datetime as datetime_type
+        from zoneinfo import ZoneInfo
+
+        local_time = parse_hhmm(hhmm)
+        local_dt = datetime_type.combine(
+            attendance_date,
+            local_time,
+            tzinfo=ZoneInfo(timezone_name),
+        )
+        return local_dt.astimezone(timezone.utc)
+
     async def close_session(
         self,
         *,
         session_id: int,
         now: datetime,
     ) -> SessionCloseResult:
-        """Close a session and create ABSENT records for unchecked members.
+        """세션을 마감하고 미체크 멤버의 ABSENT 기록을 생성한다.
 
         Args:
             session_id: attendance_sessions.id.
@@ -326,9 +436,9 @@ class SessionService:
                 (session_id,),
             )
             already_recorded_count = int(all_members[0]["count"]) - len(unchecked_members)
-            # The whole close runs in one transaction so a session cannot be
-            # half closed: every ABSENT record, its -3 ledger event, and the
-            # CLOSED status are committed or rolled back together.
+            # 마감 전체는 하나의 트랜잭션에서 실행된다. 모든 ABSENT 기록,
+            # 해당 -3점 이벤트, CLOSED 상태가 함께 커밋되거나 함께 롤백되어
+            # 세션이 반쯤만 마감된 상태로 남지 않는다.
             for member in unchecked_members:
                 attendance_status = "ABSENT"
                 excuse_request_id = None
@@ -398,7 +508,7 @@ class SessionService:
         *,
         now: datetime,
     ) -> RecoveryResult:
-        """Close all overdue sessions using the same close logic.
+        """동일한 마감 로직으로 지연된 모든 세션을 마감한다.
 
         Args:
             now: Current timezone-aware UTC time.
@@ -469,7 +579,7 @@ class SessionService:
         timezone_name: str,
         attendance_date: str,
     ) -> SessionPrepareResult:
-        """Apply current-time rules to an existing session.
+        """기존 세션에 현재 시각 기준 규칙을 적용한다.
 
         Args:
             session: Existing ``attendance_sessions`` row.

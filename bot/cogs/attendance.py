@@ -1,4 +1,4 @@
-"""Attendance check-in and status slash commands."""
+"""출석 체크인, 현황 조회, 관리자 정정 슬래시 명령어를 제공한다."""
 
 from datetime import datetime, timezone
 import logging
@@ -26,14 +26,14 @@ logger = logging.getLogger(__name__)
 
 
 class AttendanceCog(commands.Cog):
-    """Slash commands for user check-in and today's attendance status."""
+    """사용자 출석과 오늘 출석 현황 명령어를 제공한다."""
 
     def __init__(
         self,
         attendance_service: AttendanceService,
         guild_service: GuildService | None = None,
     ) -> None:
-        """Create the Cog.
+        """Cog 의존성을 초기화한다.
 
         Args:
             attendance_service: Service that owns attendance business rules.
@@ -53,7 +53,7 @@ class AttendanceCog(commands.Cog):
         self,
         interaction: discord.Interaction,
     ) -> None:
-        """Handle the /출석 command."""
+        """/출석 명령을 처리한다."""
 
         guild = interaction.guild
 
@@ -71,6 +71,9 @@ class AttendanceCog(commands.Cog):
                 guild_id=guild.id,
                 discord_id=interaction.user.id,
                 now=datetime.now(timezone.utc),
+                current_voice_channel_id=self._current_voice_channel_id(
+                    interaction.user
+                ),
             )
         except Exception:
             logger.exception(
@@ -98,7 +101,7 @@ class AttendanceCog(commands.Cog):
         self,
         interaction: discord.Interaction,
     ) -> None:
-        """Handle the /출석현황 command."""
+        """/출석현황 명령을 처리한다."""
 
         guild = interaction.guild
 
@@ -162,7 +165,7 @@ class AttendanceCog(commands.Cog):
         new_status: app_commands.Choice[str],
         reason: str,
     ) -> None:
-        """Handle the /출석수정 command."""
+        """/출석수정 명령을 처리한다."""
 
         guild = interaction.guild
 
@@ -227,7 +230,7 @@ class AttendanceCog(commands.Cog):
         self,
         result: AttendanceCheckInResult,
     ) -> str:
-        """Build a user-facing check-in response.
+        """사용자에게 보여 줄 출석 응답 메시지를 만든다.
 
         Args:
             result: Service result for /출석.
@@ -315,7 +318,7 @@ class AttendanceCog(commands.Cog):
         self,
         result: AttendanceStatusResult,
     ) -> str:
-        """Build a user-facing /출석현황 response.
+        """/출석현황 응답 메시지를 만든다.
 
         Args:
             result: Grouped attendance status result.
@@ -368,7 +371,7 @@ class AttendanceCog(commands.Cog):
         title: str,
         members: list[AttendanceStatusMember],
     ) -> None:
-        """Append a member list section when it has content."""
+        """표시할 멤버가 있을 때 멤버 목록 섹션을 추가한다."""
 
         if not members:
             return
@@ -383,7 +386,7 @@ class AttendanceCog(commands.Cog):
         sections.append("\n".join(lines))
 
     def _build_score_progress(self, result: AttendanceCheckInResult) -> str:
-        """Build score, streak bonus, and rank-change lines."""
+        """점수, 연속 출석 보너스, 계급 변경 안내 문구를 만든다."""
 
         lines = [
             f"🎯 이번 점수: {result.score_delta:+d}",
@@ -400,7 +403,7 @@ class AttendanceCog(commands.Cog):
         value: str | None,
         timezone_name: str | None,
     ) -> str:
-        """Format a UTC ISO 8601 timestamp as guild-local HH:MM."""
+        """UTC ISO 8601 시각을 서버 로컬 HH:MM 형식으로 변환한다."""
 
         if value is None or timezone_name is None:
             return "-"
@@ -410,7 +413,7 @@ class AttendanceCog(commands.Cog):
         return "-" if formatted is None else formatted
 
     def _attendance_status_label(self, status: str | None) -> str:
-        """Return a Korean label for a stored attendance status."""
+        """저장된 출석 상태에 대응하는 한국어 라벨을 반환한다."""
 
         labels = {
             "PRESENT": "정상 출석",
@@ -421,12 +424,25 @@ class AttendanceCog(commands.Cog):
         }
         return labels.get(status, status or "-")
 
+    def _current_voice_channel_id(
+        self,
+        user: discord.abc.User,
+    ) -> int | None:
+        """사용자가 현재 접속한 음성 채널 ID를 반환한다."""
+
+        if not isinstance(user, discord.Member):
+            return None
+        voice_state = user.voice
+        if voice_state is None or voice_state.channel is None:
+            return None
+        return voice_state.channel.id
+
     def _build_correction_message(
         self,
         result: AttendanceCorrectionResult,
         target_mention: str,
     ) -> str:
-        """Build a user-facing correction response."""
+        """사용자에게 보여 줄 출석 정정 응답 메시지를 만든다."""
 
         if result.status is AttendanceCorrectionStatus.UPDATED:
             return (

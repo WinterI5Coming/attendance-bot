@@ -1,4 +1,4 @@
-"""SQLite access for member attendance records."""
+"""멤버 출석 기록에 대한 SQLite 접근을 담당한다."""
 
 from typing import Any
 
@@ -8,10 +8,10 @@ from bot.db.database import Database
 
 
 class AttendanceRepository:
-    """Run SQL for ``attendance_records`` rows."""
+    """``attendance_records`` 행을 다루는 SQL을 실행한다."""
 
     def __init__(self, database: Database) -> None:
-        """Create the repository.
+        """저장소 의존성을 초기화한다.
 
         Args:
             database: Database object that opens configured SQLite connections.
@@ -26,7 +26,7 @@ class AttendanceRepository:
         member_id: int,
         connection: aiosqlite.Connection | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch a member's attendance record in one session.
+        """한 세션 안에서 멤버의 출석 기록을 조회한다.
 
         Args:
             session_id: ``attendance_sessions.id``.
@@ -76,7 +76,7 @@ class AttendanceRepository:
         checked_at: str,
         connection: aiosqlite.Connection,
     ) -> dict[str, Any]:
-        """Create a user-generated PRESENT or LATE attendance record.
+        """사용자가 만든 PRESENT 또는 LATE 출석 기록을 생성한다.
 
         Args:
             session_id: ``attendance_sessions.id``.
@@ -142,7 +142,7 @@ class AttendanceRepository:
         excuse_request_id: int,
         connection: aiosqlite.Connection,
     ) -> None:
-        """Link an attendance record to an approved excuse request."""
+        """출석 기록을 승인된 사유 신청과 연결한다."""
 
         await connection.execute(
             """
@@ -310,7 +310,7 @@ class AttendanceRepository:
         now: str,
         connection: aiosqlite.Connection,
     ) -> None:
-        """Apply an approved excuse to an existing attendance record."""
+        """승인된 사유를 기존 출석 기록에 반영한다."""
 
         if new_status not in {"PRESENT", "EXCUSED_LATE", "EXCUSED_ABSENT"}:
             raise ValueError("Invalid status for excuse reconciliation.")

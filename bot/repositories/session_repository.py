@@ -1,4 +1,4 @@
-"""SQLite access for attendance sessions and session member snapshots."""
+"""출석 세션과 세션 멤버 스냅샷에 대한 SQLite 접근을 담당한다."""
 
 from typing import Any
 
@@ -8,10 +8,10 @@ from bot.db.database import Database
 
 
 class SessionRepository:
-    """Run SQL for attendance sessions and their fixed member snapshots."""
+    """출석 세션과 고정 멤버 스냅샷을 다루는 SQL을 실행한다."""
 
     def __init__(self, database: Database) -> None:
-        """Create the repository.
+        """저장소 의존성을 초기화한다.
 
         Args:
             database: Database object that opens configured SQLite connections.
@@ -26,7 +26,7 @@ class SessionRepository:
         attendance_date: str,
         connection: aiosqlite.Connection | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch one session by guild and guild-local attendance date.
+        """서버와 서버 로컬 출석일로 세션 하나를 조회한다.
 
         Args:
             guild_id: Discord guild ID stored as text.
@@ -51,6 +51,10 @@ class SessionRepository:
                     start_at,
                     late_at,
                     close_at,
+                    verification_end_at,
+                    required_voice_seconds,
+                    early_leave_penalty,
+                    no_participation_penalty,
                     status,
                     opened_at,
                     closed_at,
@@ -78,7 +82,7 @@ class SessionRepository:
         session_id: int,
         connection: aiosqlite.Connection | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch one session by its internal ID.
+        """내부 ID로 세션 하나를 조회한다.
 
         Args:
             session_id: ``attendance_sessions.id``.
@@ -102,6 +106,10 @@ class SessionRepository:
                     start_at,
                     late_at,
                     close_at,
+                    verification_end_at,
+                    required_voice_seconds,
+                    early_leave_penalty,
+                    no_participation_penalty,
                     status,
                     opened_at,
                     closed_at,
@@ -131,12 +139,16 @@ class SessionRepository:
         start_at: str,
         late_at: str,
         close_at: str,
+        verification_end_at: str | None = None,
+        required_voice_seconds: int | None = None,
+        early_leave_penalty: int | None = None,
+        no_participation_penalty: int | None = None,
         status: str,
         opened_at: str | None,
         member_ids: list[int],
         now: str,
     ) -> dict[str, Any]:
-        """Create a session and its participant snapshot in one transaction.
+        """세션과 참여자 스냅샷을 하나의 트랜잭션으로 생성한다.
 
         Args:
             guild_id: Discord guild ID stored as text.
@@ -170,12 +182,16 @@ class SessionRepository:
                     start_at,
                     late_at,
                     close_at,
+                    verification_end_at,
+                    required_voice_seconds,
+                    early_leave_penalty,
+                    no_participation_penalty,
                     status,
                     opened_at,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     guild_id,
@@ -183,6 +199,10 @@ class SessionRepository:
                     start_at,
                     late_at,
                     close_at,
+                    verification_end_at,
+                    required_voice_seconds,
+                    early_leave_penalty,
+                    no_participation_penalty,
                     status,
                     opened_at,
                     now,
@@ -193,8 +213,8 @@ class SessionRepository:
             assert cursor.lastrowid is not None
             session_id = cursor.lastrowid
 
-            # This snapshot is the guardrail that keeps historical attendance
-            # targets stable even if members are added or deactivated later.
+            # 이 스냅샷은 이후 멤버가 추가되거나 비활성화되어도
+            # 과거 출석 대상자가 흔들리지 않게 고정하는 안전장치다.
             await connection.executemany(
                 """
                 INSERT INTO attendance_session_members (
@@ -229,7 +249,7 @@ class SessionRepository:
         session_id: int,
         member_id: int,
     ) -> bool:
-        """Return whether a member belongs to a session snapshot.
+        """멤버가 세션 스냅샷에 포함되어 있는지 반환한다.
 
         Args:
             session_id: ``attendance_sessions.id``.
@@ -262,7 +282,7 @@ class SessionRepository:
         session_id: int,
         now: str,
     ) -> dict[str, Any] | None:
-        """Open a scheduled session if it has not already changed state.
+        """상태가 아직 바뀌지 않은 예약 세션을 연다.
 
         Args:
             session_id: ``attendance_sessions.id``.
@@ -302,7 +322,7 @@ class SessionRepository:
         *,
         session_id: int,
     ) -> list[dict[str, Any]]:
-        """List session snapshot members with any existing attendance record.
+        """세션 스냅샷 멤버와 기존 출석 기록을 함께 조회한다.
 
         Args:
             session_id: ``attendance_sessions.id``.
@@ -322,13 +342,25 @@ class SessionRepository:
                     m.discord_id,
                     m.display_name,
                     ar.id AS attendance_record_id,
-                    ar.status AS attendance_status,
+                    CASE
+                        WHEN abs_adj.id IS NOT NULL THEN 'EXCUSED_ABSENT'
+                        WHEN late_adj.resulting_status IS NOT NULL THEN late_adj.resulting_status
+                        ELSE ar.status
+                    END AS attendance_status,
                     ar.checked_at
                 FROM attendance_session_members AS asm
                 JOIN members AS m ON m.id = asm.member_id
                 LEFT JOIN attendance_records AS ar
                     ON ar.session_id = asm.session_id
                     AND ar.member_id = asm.member_id
+                LEFT JOIN attendance_adjustments AS late_adj
+                    ON late_adj.attendance_record_id = ar.id
+                    AND late_adj.adjustment_type = 'LATE_REDUCTION'
+                    AND late_adj.status = 'ACTIVE'
+                LEFT JOIN attendance_adjustments AS abs_adj
+                    ON abs_adj.attendance_record_id = ar.id
+                    AND abs_adj.adjustment_type = 'ABSENCE_EXEMPTION'
+                    AND abs_adj.status = 'ACTIVE'
                 WHERE asm.session_id = ?
                 ORDER BY m.display_name COLLATE NOCASE;
                 """,
@@ -366,6 +398,10 @@ class SessionRepository:
                     start_at,
                     late_at,
                     close_at,
+                    verification_end_at,
+                    required_voice_seconds,
+                    early_leave_penalty,
+                    no_participation_penalty,
                     status,
                     opened_at,
                     closed_at,
@@ -391,7 +427,7 @@ class SessionRepository:
     async def list_start_announcement_targets(
         self,
     ) -> list[dict[str, Any]]:
-        """List open sessions whose start announcement was not sent."""
+        """시작 안내가 아직 전송되지 않은 열린 세션을 조회한다."""
 
         connection = await self.database.connect()
 
@@ -405,6 +441,10 @@ class SessionRepository:
                     s.start_at,
                     s.late_at,
                     s.close_at,
+                    s.verification_end_at,
+                    s.required_voice_seconds,
+                    s.early_leave_penalty,
+                    s.no_participation_penalty,
                     gs.attendance_channel_id,
                     gs.announcement_channel_id,
                     gs.timezone
@@ -424,7 +464,7 @@ class SessionRepository:
     async def list_close_announcement_targets(
         self,
     ) -> list[dict[str, Any]]:
-        """List closed sessions whose close announcement was not sent."""
+        """마감 안내가 아직 전송되지 않은 종료 세션을 조회한다."""
 
         connection = await self.database.connect()
 
@@ -438,6 +478,10 @@ class SessionRepository:
                     s.start_at,
                     s.late_at,
                     s.close_at,
+                    s.verification_end_at,
+                    s.required_voice_seconds,
+                    s.early_leave_penalty,
+                    s.no_participation_penalty,
                     s.closed_at,
                     gs.attendance_channel_id,
                     gs.announcement_channel_id,
@@ -461,7 +505,7 @@ class SessionRepository:
         session_id: int,
         now: str,
     ) -> None:
-        """Mark a session start announcement as sent."""
+        """세션 시작 안내를 전송 완료로 표시한다."""
 
         connection = await self.database.connect()
 
@@ -487,7 +531,7 @@ class SessionRepository:
         session_id: int,
         now: str,
     ) -> None:
-        """Mark a session close announcement as sent."""
+        """세션 마감 안내를 전송 완료로 표시한다."""
 
         connection = await self.database.connect()
 
@@ -581,7 +625,7 @@ class SessionRepository:
         now: str,
         connection: aiosqlite.Connection,
     ) -> None:
-        """Mark a scheduled or open session as cancelled."""
+        """예약 또는 열린 세션을 취소 상태로 표시한다."""
 
         await connection.execute(
             """
@@ -606,7 +650,7 @@ class SessionRepository:
         now: str,
         connection: aiosqlite.Connection,
     ) -> None:
-        """Resume a cancelled session as SCHEDULED or OPEN."""
+        """취소된 세션을 SCHEDULED 또는 OPEN 상태로 재개한다."""
 
         if status not in {"SCHEDULED", "OPEN"}:
             raise ValueError("Resumed session status must be SCHEDULED or OPEN.")
@@ -634,7 +678,7 @@ class SessionRepository:
         session_id: int,
         connection: aiosqlite.Connection,
     ) -> list[dict[str, Any]]:
-        """List score events generated from attendance records in a session."""
+        """세션의 출석 기록에서 생성된 점수 이벤트를 조회한다."""
 
         cursor = await connection.execute(
             """
@@ -668,7 +712,7 @@ class SessionRepository:
         prefix: str,
         connection: aiosqlite.Connection,
     ) -> list[dict[str, Any]]:
-        """List session cancel/resume reversal events by dedup key prefix."""
+        """중복 방지 키 접두사로 세션 취소/재개 되돌림 이벤트를 조회한다."""
 
         cursor = await connection.execute(
             """
