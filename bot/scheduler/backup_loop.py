@@ -1,10 +1,11 @@
 """SQLite 백업 서비스를 주기적으로 실행하는 스케줄러."""
 
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 import logging
 
 from discord.ext import tasks
 
+from bot.runtime.time_provider import TimeProvider
 from bot.services.backup_service import BackupService
 
 
@@ -14,10 +15,22 @@ logger = logging.getLogger(__name__)
 class BackupScheduler:
     """UTC 날짜 기준 하루 한 번 SQLite 백업을 실행한다."""
 
-    def __init__(self, *, backup_service: BackupService) -> None:
-        """백업 실행에 사용할 서비스를 저장하고 내부 상태를 초기화한다."""
+    def __init__(
+        self,
+        *,
+        backup_service: BackupService,
+        time_provider: TimeProvider | None = None,
+    ) -> None:
+        """
+        백업 실행에 사용할 서비스를 저장하고 내부 상태를 초기화한다.
+
+        Args:
+            backup_service: 실제 SQLite 백업을 수행하는 서비스.
+            time_provider: 주기 실행 시 현재 시각을 공급하는 객체.
+        """
 
         self.backup_service = backup_service
+        self.time_provider = time_provider or TimeProvider()
         self._started = False
         self._last_backup_date: str | None = None
 
@@ -56,6 +69,6 @@ class BackupScheduler:
         """매 시간 실행되는 백업 루프 본문."""
 
         try:
-            await self.run_once(datetime.now(timezone.utc))
+            await self.run_once(self.time_provider.now_utc())
         except Exception:
             logger.exception("Backup scheduler tick failed.")

@@ -1,11 +1,12 @@
 """분 단위로 출석 자동 처리를 수행하는 스케줄러."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 from typing import Any
 
 from discord.ext import tasks
 
+from bot.runtime.time_provider import TimeProvider
 from bot.services.guild_service import GuildService
 from bot.services.session_service import SessionService
 from bot.services.voice_verification_service import VoiceVerificationService
@@ -24,18 +25,24 @@ class AttendanceScheduler:
         guild_service: GuildService,
         session_service: SessionService,
         voice_verification_service: VoiceVerificationService | None = None,
+        time_provider: TimeProvider | None = None,
         bot: Any | None = None,
     ) -> None:
-        """스케줄러 의존성을 초기화한다.
+        """
+        스케줄러 의존성을 초기화한다.
 
         Args:
-            guild_service: Service used to list configured guilds.
-            session_service: Service used to prepare and close sessions.
+            guild_service: 설정된 서버 목록을 조회하는 서비스.
+            session_service: 출석 세션 준비와 마감을 처리하는 서비스.
+            voice_verification_service: 음성 검증 마감 처리를 담당하는 서비스.
+            time_provider: 주기 실행 시 현재 시각을 공급하는 객체.
+            bot: 공지 전송에 사용할 Discord 클라이언트.
         """
 
         self.guild_service = guild_service
         self.session_service = session_service
         self.voice_verification_service = voice_verification_service
+        self.time_provider = time_provider or TimeProvider()
         self.bot = bot
         self._started = False
 
@@ -122,7 +129,7 @@ class AttendanceScheduler:
         """주기적으로 실행되는 작업 본문이다."""
 
         try:
-            await self.run_once(datetime.now(timezone.utc))
+            await self.run_once(self.time_provider.now_utc())
         except Exception:
             logger.exception("Attendance scheduler tick failed.")
 
