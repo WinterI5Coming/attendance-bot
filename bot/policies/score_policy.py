@@ -1,4 +1,4 @@
-"""Central score policy for attendance-related events."""
+"""출석 관련 이벤트의 중앙 점수 정책을 정의한다."""
 
 
 ATTENDANCE_SCORE_BY_STATUS: dict[str, int] = {
@@ -14,17 +14,17 @@ STREAK_BONUS_7_DAYS = 5
 
 
 def get_attendance_score(status: str) -> int:
-    """Return the point delta for a stored attendance record status.
+    """저장된 출석 상태에 대응하는 점수 변동값을 반환한다.
 
-    Args:
-        status: Database attendance status. Expected values are PRESENT, LATE,
-            ABSENT, EXCUSED_LATE, and EXCUSED_ABSENT.
+    인자:
+        status: 데이터베이스에 저장된 출석 상태. PRESENT, LATE, ABSENT,
+            EXCUSED_LATE, EXCUSED_ABSENT 값을 기대한다.
 
-    Returns:
-        The configured point delta for the status.
+    반환:
+        해당 상태에 설정된 점수 변동값.
 
-    Raises:
-        ValueError: If ``status`` is not part of the attendance score policy.
+    예외:
+        ValueError: ``status``가 출석 점수 정책에 포함되지 않은 경우.
     """
 
     try:
