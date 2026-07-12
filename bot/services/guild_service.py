@@ -24,7 +24,7 @@ class GuildSetupResult:
 
 @dataclass(frozen=True)
 class AttendanceTimeUpdateResult:
-    """Result of updating attendance time settings."""
+    """출석 시간 설정 변경 결과."""
 
     status: str
     attendance_start: str | None = None
@@ -88,6 +88,10 @@ class GuildService:
                 announcement_channel_id
             ),
             created_at=created_at,
+            excuse_deadline_time=self.settings.default_excuse_deadline_time,
+            excuse_deadline_days_before=self.settings.default_excuse_deadline_days_before,
+            require_excuse_approval=self.settings.default_require_excuse_approval,
+            allow_late_excuse=self.settings.default_allow_late_excuse,
         )
 
         return GuildSetupResult(
@@ -135,7 +139,7 @@ class GuildService:
         close_deadline: str,
         now: datetime,
     ) -> AttendanceTimeUpdateResult:
-        """Update attendance start, late, and close times for a guild."""
+        """서버의 출석 시작, 지각, 마감 시각을 변경한다."""
 
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be a timezone-aware datetime.")

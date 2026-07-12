@@ -1,4 +1,4 @@
-"""Administrator settings and session-control business rules."""
+"""관리자 설정과 세션 제어 비즈니스 규칙을 담당한다."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,7 +15,7 @@ from bot.utils.time_utils import build_session_window, get_server_today, parse_h
 
 
 class SettingsUpdateStatus(Enum):
-    """Expected settings update outcomes."""
+    """설정 변경 작업에서 예상되는 처리 결과."""
 
     UPDATED = "UPDATED"
     NOT_CONFIGURED = "NOT_CONFIGURED"
@@ -26,7 +26,7 @@ class SettingsUpdateStatus(Enum):
 
 
 class SessionControlStatus(Enum):
-    """Expected outcomes for today's session cancel/resume workflows."""
+    """오늘 세션 취소/재개 흐름에서 예상되는 처리 결과."""
 
     CANCELLED = "CANCELLED"
     RESUMED = "RESUMED"
@@ -44,7 +44,7 @@ class SessionControlStatus(Enum):
 
 @dataclass(frozen=True)
 class SettingsUpdateResult:
-    """Result of a guild setting update."""
+    """서버 설정 변경 결과."""
 
     status: SettingsUpdateStatus
     field: str | None = None
@@ -55,7 +55,7 @@ class SettingsUpdateResult:
 
 @dataclass(frozen=True)
 class SessionControlResult:
-    """Result of cancelling or resuming today's attendance session."""
+    """오늘 출석 세션 취소 또는 재개 결과."""
 
     status: SessionControlStatus
     session_id: int | None = None
@@ -65,7 +65,7 @@ class SessionControlResult:
 
 
 class AdminService:
-    """Handle Phase 3 administrator operations."""
+    """Phase 3 관리자 설정 변경과 세션 제어를 처리한다."""
 
     def __init__(
         self,
@@ -75,6 +75,8 @@ class AdminService:
         score_repository: ScoreRepository,
         audit_repository: AuditRepository,
     ) -> None:
+        """관리자 서비스가 사용할 Repository 의존성을 저장한다."""
+
         self.guild_repository = guild_repository
         self.session_repository = session_repository
         self.score_repository = score_repository
@@ -90,7 +92,7 @@ class AdminService:
         has_permission: bool,
         now: datetime,
     ) -> SettingsUpdateResult:
-        """Validate and update one guild setting with an audit log."""
+        """서버 설정 한 항목을 검증, 갱신하고 감사 로그를 남긴다."""
 
         self._require_aware(now)
         if not has_permission:
@@ -153,7 +155,7 @@ class AdminService:
         has_permission: bool,
         now: datetime,
     ) -> SessionControlResult:
-        """Cancel today's SCHEDULED or OPEN session and reverse attendance points."""
+        """오늘의 SCHEDULED 또는 OPEN 세션을 취소하고 출석 점수를 되돌린다."""
 
         self._require_aware(now)
         if not has_permission:
@@ -246,7 +248,7 @@ class AdminService:
         has_permission: bool,
         now: datetime,
     ) -> SessionControlResult:
-        """Resume today's CANCELLED session and restore cancelled points."""
+        """오늘의 CANCELLED 세션을 재개하고 취소된 점수를 복원한다."""
 
         self._require_aware(now)
         if not has_permission:
@@ -335,6 +337,8 @@ class AdminService:
         guild_id: int | str,
         now: datetime,
     ) -> tuple[dict, dict] | SessionControlResult:
+        """서버 설정과 오늘 날짜의 출석 세션을 함께 조회한다."""
+
         guild_id_text = str(guild_id)
         settings = await self.guild_repository.get_by_guild_id(guild_id_text)
         if settings is None:
@@ -354,6 +358,8 @@ class AdminService:
         value: str,
         settings: dict,
     ) -> SettingsUpdateResult:
+        """설정 필드별 입력 값을 DB 저장 형식으로 정규화한다."""
+
         normalized_field = field.strip().lower()
         cleaned_value = value.strip()
         aliases = {
@@ -366,6 +372,12 @@ class AdminService:
             "officer_role_id": "officer_role_id",
             "attendance_channel_id": "attendance_channel_id",
             "announcement_channel_id": "announcement_channel_id",
+            "voice_verification_enabled": "voice_verification_enabled",
+            "voice_channel_ids": "voice_channel_ids",
+            "voice_category_ids": "voice_category_ids",
+            "exempt_absence_counts_in_attendance_denominator": (
+                "exempt_absence_counts_in_attendance_denominator"
+            ),
         }
         if normalized_field not in aliases:
             return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_FIELD)
@@ -394,6 +406,27 @@ class AdminService:
         elif db_field == "excuse_mode":
             if cleaned_value not in ALLOWED_EXCUSE_MODES:
                 return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
+        elif db_field in {
+            "voice_verification_enabled",
+            "exempt_absence_counts_in_attendance_denominator",
+        }:
+            normalized_bool = cleaned_value.lower()
+            if normalized_bool in {"1", "true", "yes", "on"}:
+                cleaned_value = "1"
+            elif normalized_bool in {"0", "false", "no", "off"}:
+                cleaned_value = "0"
+            else:
+                return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
+        elif db_field in {"voice_channel_ids", "voice_category_ids"}:
+            if cleaned_value:
+                ids = [
+                    item.strip()
+                    for item in cleaned_value.split(",")
+                    if item.strip()
+                ]
+                if not ids or any(not item.isdigit() for item in ids):
+                    return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
+                cleaned_value = ",".join(dict.fromkeys(ids))
         elif db_field.endswith("_id"):
             if cleaned_value and not cleaned_value.isdigit():
                 return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
@@ -407,5 +440,7 @@ class AdminService:
         )
 
     def _require_aware(self, now: datetime) -> None:
+        """timezone-aware datetime인지 검증한다."""
+
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be a timezone-aware datetime.")

@@ -1,4 +1,4 @@
-"""Evaluation and manual score slash commands."""
+"""평가와 수동 점수 조정 슬래시 명령어를 제공한다."""
 
 from datetime import datetime, timezone
 import logging
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class EvaluationsCog(commands.Cog):
-    """Slash commands for officer evaluation and manual score adjustment."""
+    """간부 평가와 수동 점수 조정 명령어를 제공한다."""
 
     def __init__(
         self,
@@ -30,6 +30,8 @@ class EvaluationsCog(commands.Cog):
         evaluation_service: EvaluationService,
         guild_service: GuildService,
     ) -> None:
+        """Cog가 사용할 평가 서비스와 서버 설정 서비스를 저장한다."""
+
         self.evaluation_service = evaluation_service
         self.guild_service = guild_service
 
@@ -43,7 +45,7 @@ class EvaluationsCog(commands.Cog):
         score: int,
         reason: str,
     ) -> None:
-        """Handle /평가."""
+        """/평가 명령을 처리한다."""
 
         permission = await self._has_permission(interaction)
         guild = interaction.guild
@@ -80,7 +82,7 @@ class EvaluationsCog(commands.Cog):
         evaluation_id: int,
         reason: str,
     ) -> None:
-        """Handle /평가취소."""
+        """/평가취소 명령을 처리한다."""
 
         permission = await self._has_permission(interaction)
         guild = interaction.guild
@@ -122,7 +124,7 @@ class EvaluationsCog(commands.Cog):
         delta: int,
         reason: str,
     ) -> None:
-        """Handle /점수조정."""
+        """/점수조정 명령을 처리한다."""
 
         permission = await self._has_permission(interaction)
         guild = interaction.guild
@@ -151,6 +153,8 @@ class EvaluationsCog(commands.Cog):
         )
 
     async def _has_permission(self, interaction: discord.Interaction) -> bool:
+        """명령 실행자가 평가/점수 조정 권한을 갖고 있는지 확인한다."""
+
         guild = interaction.guild
         if guild is None:
             return False
@@ -160,6 +164,8 @@ class EvaluationsCog(commands.Cog):
         return has_officer_permission(interaction, settings["officer_role_id"])
 
     def _evaluation_message(self, result: EvaluationResult, target: str) -> str:
+        """평가 생성 또는 취소 결과를 사용자 응답 문자열로 변환한다."""
+
         if result.status is EvaluationStatus.CREATED:
             return (
                 "평가를 등록했습니다.\n"
@@ -191,6 +197,8 @@ class EvaluationsCog(commands.Cog):
         return messages[result.status]
 
     def _manual_score_message(self, result: ManualScoreResult, target: str) -> str:
+        """수동 점수 조정 결과를 사용자 응답 문자열로 변환한다."""
+
         if result.status is ManualScoreStatus.ADJUSTED:
             return (
                 "점수를 조정했습니다.\n"

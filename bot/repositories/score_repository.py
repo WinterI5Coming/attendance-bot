@@ -1,4 +1,4 @@
-"""SQLite access for score ledger events."""
+"""점수 원장 이벤트에 대한 SQLite 접근을 담당한다."""
 
 from typing import Any
 
@@ -8,10 +8,10 @@ from bot.db.database import Database
 
 
 class ScoreRepository:
-    """Run SQL for ``score_events`` ledger rows."""
+    """``score_events`` 원장 행을 다루는 SQL을 실행한다."""
 
     def __init__(self, database: Database) -> None:
-        """Create the repository.
+        """저장소 의존성을 초기화한다.
 
         Args:
             database: Database object that opens configured SQLite connections.
@@ -31,7 +31,7 @@ class ScoreRepository:
         created_at: str,
         connection: aiosqlite.Connection,
     ) -> int:
-        """Create one score event for an attendance record.
+        """출석 기록 하나에 대한 점수 이벤트를 생성한다.
 
         Args:
             guild_id: Discord guild ID stored as text.
@@ -68,8 +68,8 @@ class ScoreRepository:
                 f"Unsupported attendance score event status: {attendance_status!r}"
             ) from exc
 
-        # The dedup key makes score creation idempotent for a single
-        # attendance record even if retry or race conditions reach this point.
+        # 중복 방지 키(dedup_key)는 재시도나 경합이 여기까지 도달해도
+        # 하나의 출석 기록에 대한 점수 생성이 한 번만 일어나게 한다.
         cursor = await connection.execute(
             """
             INSERT INTO score_events (
@@ -108,7 +108,7 @@ class ScoreRepository:
         member_id: int,
         connection: aiosqlite.Connection | None = None,
     ) -> int:
-        """Return a member's current total score from the score ledger.
+        """점수 원장에서 멤버의 현재 총점을 반환한다.
 
         Args:
             member_id: ``members.id``.
@@ -215,7 +215,7 @@ class ScoreRepository:
         created_at: str,
         connection: aiosqlite.Connection,
     ) -> int:
-        """Create a generic score event with an explicit deduplication key."""
+        """명시적인 중복 방지 키를 가진 일반 점수 이벤트를 생성한다."""
 
         cursor = await connection.execute(
             """
@@ -266,7 +266,7 @@ class ScoreRepository:
         reversed_event_id: int,
         connection: aiosqlite.Connection,
     ) -> int:
-        """Create a score event that explicitly reverses another event.
+        """다른 점수 이벤트를 명시적으로 되돌리는 점수 이벤트를 생성한다.
 
         Score rows are append-only, so cancellation never deletes or edits the
         original points. A reversal keeps totals correct while preserving the
@@ -313,7 +313,7 @@ class ScoreRepository:
         score_event_id: int,
         connection: aiosqlite.Connection | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch one score ledger row by ID."""
+        """ID로 점수 원장 행 하나를 조회한다."""
 
         owns_connection = connection is None
         if connection is None:

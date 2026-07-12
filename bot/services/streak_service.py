@@ -1,4 +1,4 @@
-"""Streak calculation and bonus application."""
+"""연속 출석 계산과 보너스 지급 서비스."""
 
 from dataclasses import dataclass
 
@@ -18,7 +18,7 @@ BONUSES = {
 
 @dataclass(frozen=True)
 class StreakBonusResult:
-    """Result of applying a possible streak bonus."""
+    """연속 출석 보너스 적용 결과."""
 
     current_streak: int
     bonus_delta: int = 0
@@ -26,9 +26,11 @@ class StreakBonusResult:
 
 
 class StreakService:
-    """Calculate current attendance streaks and award milestone bonuses."""
+    """현재 연속 출석 수를 계산하고 milestone 보너스를 지급한다."""
 
     def __init__(self, *, score_repository: ScoreRepository) -> None:
+        """연속 출석 보너스 점수 저장에 사용할 Repository를 저장한다."""
+
         self.score_repository = score_repository
 
     async def calculate_current_streak(
@@ -38,7 +40,7 @@ class StreakService:
         member_id: int,
         connection: aiosqlite.Connection | None = None,
     ) -> int:
-        """Return the current streak for a guild member."""
+        """대원의 현재 연속 출석 수를 계산한다."""
 
         owns_connection = connection is None
         if connection is None:
@@ -47,12 +49,25 @@ class StreakService:
         try:
             cursor = await connection.execute(
                 """
-                SELECT ar.status
+                SELECT
+                    CASE
+                        WHEN abs_adj.id IS NOT NULL THEN 'EXEMPT_ABSENT'
+                        WHEN late_adj.resulting_status IS NOT NULL THEN late_adj.resulting_status
+                        ELSE ar.status
+                    END AS status
                 FROM attendance_session_members AS asm
                 JOIN attendance_sessions AS s ON s.id = asm.session_id
                 LEFT JOIN attendance_records AS ar
                     ON ar.session_id = asm.session_id
                     AND ar.member_id = asm.member_id
+                LEFT JOIN attendance_adjustments AS late_adj
+                    ON late_adj.attendance_record_id = ar.id
+                    AND late_adj.adjustment_type = 'LATE_REDUCTION'
+                    AND late_adj.status = 'ACTIVE'
+                LEFT JOIN attendance_adjustments AS abs_adj
+                    ON abs_adj.attendance_record_id = ar.id
+                    AND abs_adj.adjustment_type = 'ABSENCE_EXEMPTION'
+                    AND abs_adj.status = 'ACTIVE'
                 WHERE s.guild_id = ?
                   AND asm.member_id = ?
                   AND s.status != 'CANCELLED'
@@ -69,7 +84,7 @@ class StreakService:
                 if status in COUNTING_STATUSES:
                     streak += 1
                     continue
-                if status in NEUTRAL_STATUSES:
+                if status in NEUTRAL_STATUSES or status == "EXEMPT_ABSENT":
                     continue
                 break
             return streak
@@ -86,7 +101,7 @@ class StreakService:
         created_at: str,
         connection: aiosqlite.Connection,
     ) -> StreakBonusResult:
-        """Award a 3-day or 7-day streak bonus when this session reaches it."""
+        """이번 세션으로 3일 또는 7일 연속 출석을 달성하면 보너스를 지급한다."""
 
         streak = await self.calculate_current_streak(
             guild_id=guild_id,

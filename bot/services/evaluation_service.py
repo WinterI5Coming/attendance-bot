@@ -1,4 +1,4 @@
-"""Business rules for officer evaluations and manual score adjustments."""
+"""간부 평가와 수동 점수 조정 비즈니스 규칙을 담당한다."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,7 +22,7 @@ MAX_REASON_LENGTH = 500
 
 
 class EvaluationStatus(Enum):
-    """Expected outcomes for evaluation operations."""
+    """평가 작업에서 예상되는 처리 결과."""
 
     CREATED = "CREATED"
     CANCELLED = "CANCELLED"
@@ -36,7 +36,7 @@ class EvaluationStatus(Enum):
 
 
 class ManualScoreStatus(Enum):
-    """Expected outcomes for manual score adjustment."""
+    """수동 점수 조정에서 예상되는 처리 결과."""
 
     ADJUSTED = "ADJUSTED"
     INVALID_SCORE = "INVALID_SCORE"
@@ -47,7 +47,7 @@ class ManualScoreStatus(Enum):
 
 @dataclass(frozen=True)
 class EvaluationResult:
-    """Result of creating or cancelling an evaluation."""
+    """평가 생성 또는 취소 결과."""
 
     status: EvaluationStatus
     evaluation_id: int | None = None
@@ -64,7 +64,7 @@ class EvaluationResult:
 
 @dataclass(frozen=True)
 class ManualScoreResult:
-    """Result of a manual score adjustment."""
+    """수동 점수 조정 결과."""
 
     status: ManualScoreStatus
     target_discord_id: str | None = None
@@ -78,7 +78,7 @@ class ManualScoreResult:
 
 
 class EvaluationService:
-    """Create evaluations, cancel evaluations, and adjust score manually."""
+    """평가 생성, 평가 취소, 수동 점수 조정을 처리한다."""
 
     def __init__(
         self,
@@ -88,7 +88,7 @@ class EvaluationService:
         evaluation_repository: EvaluationRepository,
         audit_repository: AuditRepository,
     ) -> None:
-        """Create the service."""
+        """서비스 의존성을 초기화한다."""
 
         self.member_repository = member_repository
         self.score_repository = score_repository
@@ -106,7 +106,7 @@ class EvaluationService:
         has_permission: bool,
         now: datetime,
     ) -> EvaluationResult:
-        """Create an officer evaluation and its score event atomically."""
+        """간부 평가와 점수 이벤트를 원자적으로 생성한다."""
 
         self._require_aware(now)
         if not has_permission:
@@ -226,7 +226,7 @@ class EvaluationService:
         has_permission: bool,
         now: datetime,
     ) -> EvaluationResult:
-        """Cancel an ACTIVE evaluation with a reversal score event."""
+        """ACTIVE 평가를 되돌림 점수 이벤트와 함께 취소한다."""
 
         self._require_aware(now)
         if not has_permission:
@@ -351,7 +351,7 @@ class EvaluationService:
         has_permission: bool,
         now: datetime,
     ) -> ManualScoreResult:
-        """Create a manual score adjustment event and audit log."""
+        """수동 점수 조정 이벤트와 감사 로그를 생성한다."""
 
         self._require_aware(now)
         if not has_permission:
@@ -443,8 +443,12 @@ class EvaluationService:
         )
 
     def _valid_reason(self, reason: str) -> bool:
+        """평가 또는 수동 점수 조정 사유 길이가 정책 범위 안인지 확인한다."""
+
         return MIN_REASON_LENGTH <= len(reason) <= MAX_REASON_LENGTH
 
     def _require_aware(self, now: datetime) -> None:
+        """timezone-aware datetime인지 검증한다."""
+
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be a timezone-aware datetime.")

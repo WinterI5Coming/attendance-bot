@@ -1,4 +1,4 @@
-"""Report-related slash commands."""
+"""출석 리포트와 랭킹 관련 슬래시 명령어를 제공한다."""
 
 from datetime import datetime, timezone
 import logging
@@ -21,15 +21,17 @@ logger = logging.getLogger(__name__)
 
 
 class ReportsCog(commands.Cog):
-    """Slash commands for personal, public, ranking, and weekly reports."""
+    """개인, 공개, 랭킹, 주간 리포트 명령어를 제공한다."""
 
     def __init__(self, report_service: ReportService) -> None:
+        """리포트 조회에 사용할 서비스를 저장한다."""
+
         self.report_service = report_service
 
     @app_commands.command(name="내정보", description="내 출석 통계와 점수를 조회합니다.")
     @app_commands.guild_only()
     async def my_info(self, interaction: discord.Interaction) -> None:
-        """Handle /내정보."""
+        """/내정보 명령을 처리한다."""
 
         guild = interaction.guild
         if guild is None:
@@ -60,7 +62,7 @@ class ReportsCog(commands.Cog):
     @app_commands.command(name="랭킹", description="현재 출석 점수 랭킹을 조회합니다.")
     @app_commands.guild_only()
     async def ranking(self, interaction: discord.Interaction) -> None:
-        """Handle /랭킹."""
+        """/랭킹 명령을 처리한다."""
 
         guild = interaction.guild
         if guild is None:
@@ -93,7 +95,7 @@ class ReportsCog(commands.Cog):
         interaction: discord.Interaction,
         target_member: discord.Member,
     ) -> None:
-        """Handle /리포트."""
+        """/리포트 명령을 처리한다."""
 
         guild = interaction.guild
         if guild is None:
@@ -129,7 +131,7 @@ class ReportsCog(commands.Cog):
         interaction: discord.Interaction,
         previous_week: bool = False,
     ) -> None:
-        """Handle /주간보고."""
+        """/주간보고 명령을 처리한다."""
 
         guild = interaction.guild
         if guild is None:
@@ -159,7 +161,7 @@ class ReportsCog(commands.Cog):
         )
 
     def _build_personal_message(self, result: PersonalReportResult) -> str:
-        """Build the personal report message."""
+        """개인 리포트 메시지를 만든다."""
 
         if not result.found:
             return "출석 대상자로 등록되어 있지 않습니다."
@@ -193,7 +195,7 @@ class ReportsCog(commands.Cog):
         )
 
     def _build_ranking_message(self, result: RankingResult) -> str:
-        """Build the ranking response."""
+        """랭킹 응답 메시지를 만든다."""
 
         if not result.configured:
             return "초기설정이 필요합니다."
@@ -202,20 +204,62 @@ class ReportsCog(commands.Cog):
         if not entries:
             return "랭킹에 표시할 활성 대상자가 없습니다."
 
-        lines = ["출석 랭킹\n"]
+        lines = [
+            "🏆 **출석 랭킹: 오늘의 생존자 명단**",
+            "점수판은 친절하지 않습니다. 위는 번쩍이고, 아래는 차갑습니다.\n",
+        ]
         for entry in entries:
+            badge = self._ranking_badge(entry.rank_no)
+            comment = self._ranking_comment(entry.total_score, entry.rank_no)
             lines.append(
-                f"{entry.rank_no}. <@{entry.discord_id}> "
-                f"{entry.total_score}점 / {entry.rank} / 연속 {entry.current_streak}회"
+                f"{badge} **{entry.rank_no}위** <@{entry.discord_id}>\n"
+                f"> `점수 {entry.total_score:+d}` · **{entry.rank}** · "
+                f"🔥 연속 {entry.current_streak}회\n"
+                f"> {comment}"
             )
         return "\n".join(lines)
+
+    def _ranking_badge(self, rank_no: int) -> str:
+        """순위에 맞는 장식 배지를 반환한다."""
+
+        badges = {
+            1: "🥇",
+            2: "🥈",
+            3: "🥉",
+        }
+        return badges.get(rank_no, "🔻")
+
+    def _ranking_comment(self, total_score: int, rank_no: int) -> str:
+        """랭킹 줄에 붙일 짧은 평가 멘트를 만든다."""
+
+        if total_score >= 500:
+            return "✨ 점수판 위에 이름을 새겼습니다. 보는 맛이 있습니다."
+        if total_score >= 150:
+            return "🌟 상위권 공기가 다릅니다. 지금 꽤 화려합니다."
+        if total_score >= 70:
+            return "⚔️ 제법 매섭습니다. 아래쪽에서 올려다보면 목 아픈 위치."
+        if total_score >= 25:
+            return "🔥 아직 왕관은 멀지만, 체면은 확실히 챙겼습니다."
+        if total_score >= 10:
+            return "🧱 중간은 지켰습니다. 여기서 미끄러지면 바로 추락입니다."
+        if total_score >= 0:
+            return "🫥 살아는 있습니다. 점수판이 아직 봐주는 중입니다."
+        if rank_no == 1:
+            return "🕳️ 음수인데 1위라면 서버 전체가 같이 반성해야 합니다."
+        if total_score <= -100:
+            return "💀 바닥 밑 지하실입니다. 점수판도 눈을 피했습니다."
+        if total_score <= -50:
+            return "🧨 내려가는 폼이 예술입니다. 분노를 부르는 역주행."
+        if total_score <= -10:
+            return "🪦 굴욕 구간 입성. 이제부터는 올라오는 것도 콘텐츠입니다."
+        return "🥀 음수입니다. 점수판 맨바닥 청소 담당."
 
     def _build_public_report_message(
         self,
         result: PublicReportResult,
         target_mention: str,
     ) -> str:
-        """Build a public-safe member report message."""
+        """공개 채널에 노출해도 되는 멤버 리포트 메시지를 만든다."""
 
         if not result.found:
             return "대상자의 근태 기록을 찾을 수 없습니다."
@@ -254,7 +298,7 @@ class ReportsCog(commands.Cog):
         )
 
     def _build_weekly_report_message(self, result: WeeklyReportResult) -> str:
-        """Build a guild weekly report message."""
+        """서버 주간 리포트 메시지를 만든다."""
 
         if not result.configured:
             return "초기설정이 필요합니다."

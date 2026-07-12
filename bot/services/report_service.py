@@ -1,4 +1,4 @@
-"""Business rules for personal attendance reports."""
+"""개인 출석 리포트 비즈니스 규칙을 담당한다."""
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
@@ -16,7 +16,7 @@ from bot.services.streak_service import StreakService
 
 @dataclass(frozen=True)
 class PersonalReportResult:
-    """Computed report for one active member."""
+    """활성 멤버 한 명에 대해 계산된 리포트."""
 
     found: bool
     display_name: str | None = None
@@ -37,7 +37,7 @@ class PersonalReportResult:
 
 @dataclass(frozen=True)
 class RankingEntry:
-    """One row in the guild ranking."""
+    """서버 랭킹의 한 행."""
 
     rank_no: int
     discord_id: str
@@ -49,7 +49,7 @@ class RankingEntry:
 
 @dataclass(frozen=True)
 class RankingResult:
-    """Ranking result for active guild members."""
+    """서버 활성 멤버 랭킹 결과."""
 
     configured: bool
     entries: list[RankingEntry] | None = None
@@ -57,7 +57,7 @@ class RankingResult:
 
 @dataclass(frozen=True)
 class PublicReportResult:
-    """Public-safe report for a target member."""
+    """대상 멤버의 공개 가능한 리포트."""
 
     found: bool
     target_discord_id: str | None = None
@@ -79,7 +79,7 @@ class PublicReportResult:
 
 @dataclass(frozen=True)
 class WeeklyMemberRow:
-    """One per-member row in a weekly report."""
+    """주간 리포트의 멤버별 한 행."""
 
     discord_id: str
     display_name: str
@@ -95,7 +95,7 @@ class WeeklyMemberRow:
 
 @dataclass(frozen=True)
 class WeeklyReportResult:
-    """Guild weekly attendance and score summary."""
+    """서버 주간 출석과 점수 요약."""
 
     configured: bool
     start_at: str | None = None
@@ -113,7 +113,7 @@ class WeeklyReportResult:
 
 
 class ReportService:
-    """Build personal attendance reports from repositories and policies."""
+    """저장소와 정책을 조합해 출석 리포트를 만든다."""
 
     def __init__(
         self,
@@ -125,7 +125,7 @@ class ReportService:
         streak_service: StreakService | None = None,
         evaluation_repository: EvaluationRepository | None = None,
     ) -> None:
-        """Create the service."""
+        """서비스 의존성을 초기화한다."""
 
         self.guild_repository = guild_repository
         self.member_repository = member_repository
@@ -140,7 +140,7 @@ class ReportService:
         guild_id: int | str,
         discord_id: int | str,
     ) -> PersonalReportResult:
-        """Return a personal report for the currently active member.
+        """현재 활성 멤버의 개인 리포트를 반환한다.
 
         Args:
             guild_id: Discord guild ID.
@@ -210,7 +210,7 @@ class ReportService:
         )
 
     async def get_ranking(self, *, guild_id: int | str, limit: int = 10) -> RankingResult:
-        """Return active member ranking for a guild."""
+        """서버의 활성 멤버 랭킹을 반환한다."""
 
         guild_id_text = str(guild_id)
         settings = await self.guild_repository.get_by_guild_id(guild_id_text)
@@ -265,7 +265,7 @@ class ReportService:
         guild_id: int | str,
         target_discord_id: int | str,
     ) -> PublicReportResult:
-        """Return a public-safe report for any member with historical data."""
+        """이력이 있는 멤버의 공개 가능한 리포트를 반환한다."""
 
         guild_id_text = str(guild_id)
         settings = await self.guild_repository.get_by_guild_id(guild_id_text)
@@ -332,7 +332,7 @@ class ReportService:
         now: datetime,
         previous_week: bool = False,
     ) -> WeeklyReportResult:
-        """Return the current or previous guild-local Monday-Sunday report."""
+        """현재 또는 이전 서버 로컬 월요일-일요일 리포트를 반환한다."""
 
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be a timezone-aware datetime.")
@@ -398,6 +398,8 @@ class ReportService:
         )
 
     def _build_weekly_member_row(self, row: dict[str, Any]) -> WeeklyMemberRow:
+        """Repository의 주간 집계 행을 리포트 dataclass로 변환한다."""
+
         total_sessions = int(row["total_sessions"] or 0)
         success_count = int(row["present"] or 0) + int(row["late"] or 0) + int(
             row["excused_late"] or 0

@@ -273,7 +273,7 @@ async def test_personal_report_summary_and_zero_rate(
     assert report.present_count == 1
     assert report.attendance_rate == 100.0
     assert report.total_score == 3
-    assert report.rank == "이병"
+    assert report.rank == "먼지 이병"
     assert len(report.recent_events) == 1
     assert zero.total_sessions == 1
     assert zero.absent_count == 1

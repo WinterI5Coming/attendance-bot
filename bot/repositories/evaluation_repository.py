@@ -1,4 +1,4 @@
-"""SQLite access for officer evaluations."""
+"""간부 평가 데이터에 대한 SQLite 접근을 담당한다."""
 
 from typing import Any
 
@@ -8,7 +8,7 @@ from bot.db.database import Database
 
 
 class EvaluationRepository:
-    """Run SQL for ``evaluations`` rows.
+    """``evaluations`` 행을 다루는 SQL을 실행한다.
 
     The repository only persists and fetches rows. Business rules such as score
     range, self-evaluation prevention, and reversal creation live in the
@@ -16,7 +16,7 @@ class EvaluationRepository:
     """
 
     def __init__(self, database: Database) -> None:
-        """Create the repository.
+        """저장소 의존성을 초기화한다.
 
         Args:
             database: Database object that opens configured SQLite connections.
@@ -35,7 +35,7 @@ class EvaluationRepository:
         created_at: str,
         connection: aiosqlite.Connection,
     ) -> int:
-        """Create an ACTIVE evaluation row inside a caller transaction."""
+        """호출자 트랜잭션 안에서 ACTIVE 평가 행을 생성한다."""
 
         cursor = await connection.execute(
             """
@@ -70,7 +70,7 @@ class EvaluationRepository:
         score_event_id: int,
         connection: aiosqlite.Connection,
     ) -> None:
-        """Attach the primary score event to an evaluation."""
+        """평가 행에 기본 점수 이벤트를 연결한다."""
 
         await connection.execute(
             """
@@ -87,7 +87,7 @@ class EvaluationRepository:
         evaluation_id: int,
         connection: aiosqlite.Connection | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch one evaluation by ID."""
+        """ID로 평가 행 하나를 조회한다."""
 
         owns_connection = connection is None
         if connection is None:
@@ -135,7 +135,7 @@ class EvaluationRepository:
         reversal_score_event_id: int,
         connection: aiosqlite.Connection,
     ) -> None:
-        """Mark an ACTIVE evaluation as cancelled."""
+        """ACTIVE 평가 행을 취소 상태로 변경한다."""
 
         await connection.execute(
             """
@@ -163,7 +163,7 @@ class EvaluationRepository:
         member_id: int,
         limit: int = 3,
     ) -> list[dict[str, Any]]:
-        """Return recent public evaluation snippets for a member."""
+        """멤버의 최근 공개 평가 요약을 반환한다."""
 
         connection = await self.database.connect()
         try:

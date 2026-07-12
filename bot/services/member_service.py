@@ -130,7 +130,7 @@ class MemberService:
             except aiosqlite.IntegrityError:
                 # 동시에 같은 사용자를 등록하는 요청이 들어와 다른
                 # 요청이 먼저 행을 만든 경우. UNIQUE(guild_id,
-                # discord_id) 제약으로 INSERT가 실패하므로, 현재
+                # (guild_id, discord_id) 제약으로 INSERT가 실패하므로, 현재
                 # 행을 다시 조회해 그 상태에 맞는 결과를 반환한다.
                 existing_after_race = await self.repository.get_by_discord_id(
                     guild_id=guild_id_text,
@@ -261,7 +261,7 @@ class MemberService:
             now=now,
         )
 
-        # audit_logs 테이블이 구현되기 전까지 감사에 필요한 최소
+        # 감사 로그(audit_logs) 테이블이 구현되기 전까지 감사에 필요한 최소
         # 정보(작업자, 대상자, 서버, 사유)를 애플리케이션 로그로 남긴다.
         logger.info(
             "대원 제외 처리 완료: "

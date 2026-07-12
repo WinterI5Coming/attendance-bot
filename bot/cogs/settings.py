@@ -1,4 +1,4 @@
-"""Administrator settings and session control slash commands."""
+"""관리자 설정과 당일 세션 제어 슬래시 명령어를 제공한다."""
 
 from datetime import datetime, timezone
 import logging
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class SettingsCog(commands.Cog):
-    """Slash commands for guild settings and today's session control."""
+    """서버 설정과 오늘 출석 세션 제어 명령어를 제공한다."""
 
     def __init__(
         self,
@@ -30,13 +30,15 @@ class SettingsCog(commands.Cog):
         admin_service: AdminService,
         guild_service: GuildService,
     ) -> None:
+        """Cog가 사용할 관리자 서비스와 서버 설정 서비스를 저장한다."""
+
         self.admin_service = admin_service
         self.guild_service = guild_service
 
     @app_commands.command(name="설정조회", description="현재 근태관리 설정을 조회합니다.")
     @app_commands.guild_only()
     async def show_settings(self, interaction: discord.Interaction) -> None:
-        """Handle /설정조회."""
+        """/설정조회 명령을 처리한다."""
 
         if not await self._has_permission(interaction):
             await interaction.response.send_message("관리 권한이 필요합니다.", ephemeral=True)
@@ -77,6 +79,13 @@ class SettingsCog(commands.Cog):
             app_commands.Choice(name="officer_role_id", value="officer_role_id"),
             app_commands.Choice(name="attendance_channel_id", value="attendance_channel_id"),
             app_commands.Choice(name="announcement_channel_id", value="announcement_channel_id"),
+            app_commands.Choice(name="voice_verification_enabled", value="voice_verification_enabled"),
+            app_commands.Choice(name="voice_channel_ids", value="voice_channel_ids"),
+            app_commands.Choice(name="voice_category_ids", value="voice_category_ids"),
+            app_commands.Choice(
+                name="exempt_absence_counts_in_attendance_denominator",
+                value="exempt_absence_counts_in_attendance_denominator",
+            ),
         ]
     )
     async def update_setting(
@@ -85,7 +94,7 @@ class SettingsCog(commands.Cog):
         field: app_commands.Choice[str],
         value: str,
     ) -> None:
-        """Handle /설정변경."""
+        """/설정변경 명령을 처리한다."""
 
         permission = await self._has_permission(interaction)
         guild = interaction.guild
@@ -119,7 +128,7 @@ class SettingsCog(commands.Cog):
         interaction: discord.Interaction,
         reason: str,
     ) -> None:
-        """Handle /오늘출석취소."""
+        """/오늘출석취소 명령을 처리한다."""
 
         permission = await self._has_permission(interaction)
         guild = interaction.guild
@@ -139,7 +148,7 @@ class SettingsCog(commands.Cog):
     @app_commands.command(name="오늘출석재개", description="취소된 오늘 출석 세션을 재개합니다.")
     @app_commands.guild_only()
     async def resume_today(self, interaction: discord.Interaction) -> None:
-        """Handle /오늘출석재개."""
+        """/오늘출석재개 명령을 처리한다."""
 
         permission = await self._has_permission(interaction)
         guild = interaction.guild
@@ -156,6 +165,8 @@ class SettingsCog(commands.Cog):
         )
 
     async def _has_permission(self, interaction: discord.Interaction) -> bool:
+        """명령 실행자가 설정 변경 권한을 갖고 있는지 확인한다."""
+
         guild = interaction.guild
         if guild is None:
             return False
@@ -165,6 +176,8 @@ class SettingsCog(commands.Cog):
         return has_officer_permission(interaction, settings["officer_role_id"])
 
     def _settings_update_message(self, result: SettingsUpdateResult) -> str:
+        """설정 변경 결과를 사용자 응답 문자열로 변환한다."""
+
         if result.status is SettingsUpdateStatus.UPDATED:
             return (
                 "설정을 변경했습니다.\n"
@@ -182,6 +195,8 @@ class SettingsCog(commands.Cog):
         return messages[result.status]
 
     def _session_message(self, result: SessionControlResult) -> str:
+        """오늘 출석 세션 제어 결과를 사용자 응답 문자열로 변환한다."""
+
         if result.status is SessionControlStatus.CANCELLED:
             return (
                 "오늘 출석 세션을 취소했습니다.\n"

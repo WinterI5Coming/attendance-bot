@@ -178,7 +178,7 @@ class SetupCog(commands.Cog):
         late_deadline: str,
         close_deadline: str,
     ) -> None:
-        """Handle the /출석시간설정 command."""
+        """/출석시간설정 명령을 처리한다."""
 
         if not is_server_admin(interaction):
             await interaction.response.send_message(
@@ -222,7 +222,7 @@ class SetupCog(commands.Cog):
         )
 
     def _build_time_update_message(self, result) -> str:
-        """Build the attendance time update response."""
+        """출석 시간 변경 응답 메시지를 만든다."""
 
         if result.status == "NOT_CONFIGURED":
             return "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
