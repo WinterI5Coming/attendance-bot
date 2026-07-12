@@ -1,24 +1,38 @@
-# 환경변수
+# Environment and secrets
 .env
 
-# 가상환경
-.venv/
+# Runtime locks and logs
+*.lock
+logs/*.log
+logs/*.log.*
 
-# SQLite
+# Virtual environments
+.venv/
+venv/
+
+# SQLite data
 data/*.db
 data/*.db-shm
 data/*.db-wal
 data/backups/
+backups/
 
 # Python
 __pycache__/
 *.py[cod]
 
-# 테스트
+# Tests and scratch output
 .pytest_cache/
 .tmp*/
 
 # IDE
 .vscode/
 .idea/
-venv/
+
+# Build outputs
+build/
+dist/
+release/*.exe
+release/data/
+release/backups/
+release/logs/
