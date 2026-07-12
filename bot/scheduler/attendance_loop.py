@@ -1,4 +1,4 @@
-"""Minute-based attendance scheduler."""
+"""분 단위로 출석 자동 처리를 수행하는 스케줄러."""
 
 from datetime import datetime, timezone
 import logging
@@ -8,6 +8,7 @@ from discord.ext import tasks
 
 from bot.services.guild_service import GuildService
 from bot.services.session_service import SessionService
+from bot.services.voice_verification_service import VoiceVerificationService
 from bot.utils.time_utils import format_local_hhmm
 
 
@@ -15,16 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 class AttendanceScheduler:
-    """Runs automatic attendance preparation, opening, closing, and recovery."""
+    """출석 준비, 시작, 마감, 복구 작업을 자동으로 실행한다."""
 
     def __init__(
         self,
         *,
         guild_service: GuildService,
         session_service: SessionService,
+        voice_verification_service: VoiceVerificationService | None = None,
         bot: Any | None = None,
     ) -> None:
-        """Create the scheduler.
+        """스케줄러 의존성을 초기화한다.
 
         Args:
             guild_service: Service used to list configured guilds.
@@ -33,11 +35,12 @@ class AttendanceScheduler:
 
         self.guild_service = guild_service
         self.session_service = session_service
+        self.voice_verification_service = voice_verification_service
         self.bot = bot
         self._started = False
 
     def start(self) -> None:
-        """Start the 1-minute scheduler loop if it is not already running."""
+        """아직 실행 중이 아니면 1분 주기 스케줄러 루프를 시작한다."""
 
         if self._started:
             return
@@ -47,7 +50,7 @@ class AttendanceScheduler:
         self._loop.start()
 
     def stop(self) -> None:
-        """Stop the scheduler loop if it is running."""
+        """실행 중인 스케줄러 루프를 중지한다."""
 
         if self._loop.is_running():
             self._loop.cancel()
@@ -55,7 +58,7 @@ class AttendanceScheduler:
         logger.info("Attendance scheduler stopped.")
 
     async def run_once(self, now: datetime) -> None:
-        """Run one scheduler tick without waiting for a real minute.
+        """실제 1분 대기 없이 스케줄러 작업을 한 번 실행한다.
 
         Args:
             now: Current timezone-aware UTC time supplied by caller.
@@ -95,10 +98,18 @@ class AttendanceScheduler:
         except Exception:
             logger.exception("Attendance scheduler overdue processing failed.")
 
+        if self.voice_verification_service is not None:
+            try:
+                await self.voice_verification_service.finalize_due_verifications(
+                    now=now,
+                )
+            except Exception:
+                logger.exception("Attendance verification finalization failed.")
+
         await self._announce_closes(now)
 
     async def recover_overdue_sessions(self, now: datetime) -> None:
-        """Run restart recovery once before the periodic loop starts.
+        """주기 루프 시작 전에 재시작 복구를 한 번 실행한다.
 
         Args:
             now: Current timezone-aware UTC time.
@@ -108,7 +119,7 @@ class AttendanceScheduler:
 
     @tasks.loop(minutes=1)
     async def _loop(self) -> None:
-        """Periodic task body."""
+        """주기적으로 실행되는 작업 본문이다."""
 
         try:
             await self.run_once(datetime.now(timezone.utc))
@@ -116,7 +127,7 @@ class AttendanceScheduler:
             logger.exception("Attendance scheduler tick failed.")
 
     async def _announce_starts(self, now: datetime) -> None:
-        """Send start announcements for newly opened sessions."""
+        """새로 열린 세션의 시작 안내를 전송한다."""
 
         if self.bot is None:
             return
@@ -136,7 +147,7 @@ class AttendanceScheduler:
                 )
 
     async def _announce_closes(self, now: datetime) -> None:
-        """Send close announcements for closed sessions."""
+        """마감된 세션의 종료 안내를 전송한다."""
 
         if self.bot is None:
             return
@@ -156,7 +167,7 @@ class AttendanceScheduler:
                 )
 
     async def _send_channel_message(self, *, channel_id: str | None, content: str) -> bool:
-        """Send a message to a Discord text channel if it can be resolved."""
+        """Discord 텍스트 채널을 찾을 수 있으면 메시지를 전송한다."""
 
         if self.bot is None or not channel_id:
             return False
@@ -183,6 +194,8 @@ class AttendanceScheduler:
         return True
 
     def _build_start_message(self, session: dict[str, Any]) -> str:
+        """출석 시작 공지 메시지를 생성한다."""
+
         timezone_name = session["timezone"]
         return (
             "🚀 출석이 시작되었습니다.\n"
@@ -192,6 +205,8 @@ class AttendanceScheduler:
         )
 
     def _build_close_message(self, session: dict[str, Any]) -> str:
+        """출석 마감 공지 메시지를 생성한다."""
+
         timezone_name = session["timezone"]
         closed_at = session["closed_at"] or session["close_at"]
         return (

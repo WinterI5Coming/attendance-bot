@@ -49,6 +49,14 @@ class GuildRepository:
                     attendance_channel_id,
                     announcement_channel_id,
                     weekly_report_enabled,
+                    excuse_deadline_time,
+                    excuse_deadline_days_before,
+                    require_excuse_approval,
+                    allow_late_excuse,
+                    voice_verification_enabled,
+                    voice_channel_ids,
+                    voice_category_ids,
+                    exempt_absence_counts_in_attendance_denominator,
                     created_at,
                     updated_at
                 FROM guild_settings
@@ -81,6 +89,10 @@ class GuildRepository:
         attendance_channel_id: str,
         announcement_channel_id: str,
         created_at: str,
+        excuse_deadline_time: str = "23:00",
+        excuse_deadline_days_before: int = 1,
+        require_excuse_approval: bool = True,
+        allow_late_excuse: bool = False,
     ) -> bool:
         """서버 설정을 최초 생성한다.
 
@@ -127,10 +139,14 @@ class GuildRepository:
                     attendance_channel_id,
                     announcement_channel_id,
                     weekly_report_enabled,
+                    excuse_deadline_time,
+                    excuse_deadline_days_before,
+                    require_excuse_approval,
+                    allow_late_excuse,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     guild_id,
@@ -143,6 +159,10 @@ class GuildRepository:
                     officer_role_id,
                     attendance_channel_id,
                     announcement_channel_id,
+                    excuse_deadline_time,
+                    excuse_deadline_days_before,
+                    1 if require_excuse_approval else 0,
+                    1 if allow_late_excuse else 0,
                     created_at,
                     created_at,
                 ),
@@ -167,7 +187,7 @@ class GuildRepository:
         close_deadline: str,
         now: str,
     ) -> bool:
-        """Update attendance time settings for a configured guild."""
+        """설정된 서버의 출석 시간 설정을 변경한다."""
 
         connection = await self.database.connect()
 
@@ -206,7 +226,7 @@ class GuildRepository:
         now: str,
         connection,
     ) -> None:
-        """Update a validated subset of guild settings in a caller transaction."""
+        """검증된 서버 설정 일부를 호출자 트랜잭션 안에서 변경한다."""
 
         allowed_fields = {
             "timezone",
@@ -218,6 +238,14 @@ class GuildRepository:
             "officer_role_id",
             "attendance_channel_id",
             "announcement_channel_id",
+            "excuse_deadline_time",
+            "excuse_deadline_days_before",
+            "require_excuse_approval",
+            "allow_late_excuse",
+            "voice_verification_enabled",
+            "voice_channel_ids",
+            "voice_category_ids",
+            "exempt_absence_counts_in_attendance_denominator",
         }
         invalid_fields = set(fields) - allowed_fields
         if invalid_fields:
@@ -249,7 +277,7 @@ class GuildRepository:
         opened_at: str | None,
         now: str,
     ) -> str:
-        """Update today's open/scheduled session window when no records exist."""
+        """기록이 없을 때 오늘의 OPEN/SCHEDULED 세션 시간을 변경한다."""
 
         connection = await self.database.connect()
 
@@ -337,6 +365,14 @@ class GuildRepository:
                     attendance_channel_id,
                     announcement_channel_id,
                     weekly_report_enabled,
+                    excuse_deadline_time,
+                    excuse_deadline_days_before,
+                    require_excuse_approval,
+                    allow_late_excuse,
+                    voice_verification_enabled,
+                    voice_channel_ids,
+                    voice_category_ids,
+                    exempt_absence_counts_in_attendance_denominator,
                     created_at,
                     updated_at
                 FROM guild_settings

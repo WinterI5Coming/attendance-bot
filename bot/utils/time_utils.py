@@ -1,4 +1,4 @@
-"""Timezone and attendance window utility functions."""
+"""시간대와 출석 시간 범위 관련 유틸리티 함수."""
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -20,7 +20,7 @@ WEEKDAY_CODES = (
 
 @dataclass(frozen=True)
 class SessionWindow:
-    """UTC attendance session window.
+    """UTC 기준 출석 세션 시간 범위.
 
     Attributes:
         start_at: Time when on-time attendance opens, converted to UTC.
@@ -38,7 +38,7 @@ class SessionWindow:
 
 
 def parse_hhmm(value: str) -> time:
-    """Parse a strict ``HH:MM`` time string.
+    """엄격한 ``HH:MM`` 형식의 시간 문자열을 해석한다.
 
     Args:
         value: Time string with exactly two hour digits, a colon, and two
@@ -73,7 +73,7 @@ def build_session_window(
     close_deadline: str,
     timezone_name: str,
 ) -> SessionWindow:
-    """Build a UTC attendance window from guild-local settings.
+    """서버 로컬 설정에서 UTC 출석 시간 범위를 만든다.
 
     Args:
         attendance_date: Local guild date for the attendance session.
@@ -124,8 +124,8 @@ def build_session_window(
         tzinfo=local_timezone,
     )
 
-    # Convert guild-local boundaries to UTC before storage so every absolute
-    # timestamp has one canonical timezone-aware representation.
+    # 저장 시점에는 서버 로컬 시간이 아니라 UTC 절대 시각을 사용한다.
+    # 이렇게 해야 시간대가 다른 서버도 하나의 기준으로 비교할 수 있다.
     return SessionWindow(
         start_at=local_start.astimezone(timezone.utc),
         late_at=local_late.astimezone(timezone.utc),
@@ -134,7 +134,7 @@ def build_session_window(
 
 
 def get_server_today(now: datetime, timezone_name: str) -> date:
-    """Return the date for ``now`` in a guild's configured timezone.
+    """서버에 설정된 시간대 기준으로 ``now``의 날짜를 반환한다.
 
     Args:
         now: Current absolute time. It must be timezone-aware, usually UTC.
@@ -159,7 +159,7 @@ def get_server_today(now: datetime, timezone_name: str) -> date:
 
 
 def get_weekday_code(value: date) -> str:
-    """Return the attendance weekday code for a date.
+    """날짜에 해당하는 출석 요일 코드를 반환한다.
 
     Args:
         value: Date to convert.
@@ -172,7 +172,7 @@ def get_weekday_code(value: date) -> str:
 
 
 def parse_attendance_days(value: str) -> set[str]:
-    """Parse a comma-separated attendance day setting.
+    """쉼표로 구분된 출석 요일 설정을 해석한다.
 
     Args:
         value: Comma-separated weekday codes from ``guild_settings``.
@@ -189,7 +189,7 @@ def parse_attendance_days(value: str) -> set[str]:
 
 
 def format_local_hhmm(value: datetime | None, timezone_name: str) -> str | None:
-    """Format a UTC datetime for display in the guild timezone.
+    """UTC datetime을 서버 시간대 표시용 문자열로 변환한다.
 
     Args:
         value: Timezone-aware datetime to display, or ``None``.

@@ -1,4 +1,4 @@
-"""SQLite backup creation and retention management."""
+"""SQLite 백업 생성과 보관 정책을 관리하는 서비스."""
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class BackupResult:
-    """Result of a SQLite backup run."""
+    """SQLite 백업 실행 결과."""
 
     created: bool
     backup_path: Path | None = None
@@ -25,11 +25,11 @@ class BackupResult:
 
 
 class BackupService:
-    """Create SQLite backups and prune old backup files.
+    """SQLite 백업 파일을 생성하고 오래된 백업을 정리한다.
 
-    SQLite WAL mode can keep recent writes outside the main database file. The
-    service uses SQLite's backup API after a WAL checkpoint so the copied file is
-    a consistent standalone snapshot.
+    SQLite WAL 모드에서는 최근 쓰기가 메인 DB 파일 밖에 남을 수 있다. 그래서
+    백업 직전에 WAL checkpoint를 수행하고 SQLite backup API로 일관된 스냅샷을
+    만든다.
     """
 
     def __init__(
@@ -39,12 +39,14 @@ class BackupService:
         backup_directory: Path | None = None,
         retention_count: int = 14,
     ) -> None:
+        """백업 대상 DB, 백업 디렉터리, 보관 개수를 설정한다."""
+
         self.database = database
         self.backup_directory = backup_directory or database.db_path.parent / "backups"
         self.retention_count = retention_count
 
     async def create_backup(self, *, now: datetime | None = None) -> BackupResult:
-        """Create a timestamped database backup and prune old files."""
+        """타임스탬프가 붙은 DB 백업을 만들고 오래된 백업을 정리한다."""
 
         now = now or datetime.now(timezone.utc)
         if now.tzinfo is None or now.utcoffset() is None:
@@ -89,6 +91,8 @@ class BackupService:
             await source.close()
 
     async def _check_integrity(self, path: Path) -> bool:
+        """백업 DB에 `PRAGMA integrity_check`를 실행한다."""
+
         connection = await aiosqlite.connect(path)
         try:
             cursor = await connection.execute("PRAGMA integrity_check;")
@@ -99,6 +103,8 @@ class BackupService:
             await connection.close()
 
     def _prune_old_backups(self) -> int:
+        """보관 개수를 초과한 오래된 백업 파일을 삭제한다."""
+
         backups = sorted(
             self.backup_directory.glob("attendance-*.db"),
             key=lambda path: path.stat().st_mtime,

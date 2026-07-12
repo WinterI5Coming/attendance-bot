@@ -116,6 +116,21 @@ async def test_attendance_tables_exist_after_migration(migrated_database):
             "audit_logs",
             "excuse_requests",
             "evaluations",
+            "attendance_policies",
+            "attendance_date_overrides",
+            "voice_presence_logs",
+            "attendance_verifications",
+            "attendance_adjustments",
+            "seasons",
+            "season_member_stats",
+            "achievement_definitions",
+            "member_achievements",
+            "title_definitions",
+            "member_titles",
+            "achievement_role_mappings",
+            "officer_review_settings",
+            "officer_reviews",
+            "officer_role_change_logs",
         }.issubset(table_names)
 
         migration_rows = await connection.execute_fetchall(
@@ -125,7 +140,7 @@ async def test_attendance_tables_exist_after_migration(migrated_database):
             ORDER BY version;
             """
         )
-        assert [row["version"] for row in migration_rows] == [1, 2, 3, 4]
+        assert [row["version"] for row in migration_rows] == [1, 2, 3, 4, 5, 6, 7, 8]
     finally:
         await connection.close()
 

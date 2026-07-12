@@ -1,4 +1,4 @@
-"""SQLite access for administrator audit logs."""
+"""관리자 감사 로그에 대한 SQLite 접근을 담당한다."""
 
 import aiosqlite
 
@@ -6,10 +6,10 @@ from bot.db.database import Database
 
 
 class AuditRepository:
-    """Run SQL for ``audit_logs`` rows."""
+    """``audit_logs`` 행을 다루는 SQL을 실행한다."""
 
     def __init__(self, database: Database) -> None:
-        """Create the repository.
+        """저장소 의존성을 초기화한다.
 
         Args:
             database: Database object that opens configured SQLite connections.
@@ -31,7 +31,7 @@ class AuditRepository:
         created_at: str,
         connection: aiosqlite.Connection,
     ) -> int:
-        """Create one audit log row inside a caller-owned transaction.
+        """호출자가 소유한 트랜잭션 안에서 감사 로그 행 하나를 생성한다.
 
         Args:
             guild_id: Discord guild ID.

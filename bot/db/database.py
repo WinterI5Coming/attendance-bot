@@ -6,10 +6,14 @@ from pathlib import Path
 
 import aiosqlite
 
+from bot.runtime.paths import get_resource_directory
+
 
 logger = logging.getLogger(__name__)
 
-MIGRATIONS_DIRECTORY = Path(__file__).resolve().parent / "migrations"
+MIGRATIONS_DIRECTORY = (
+    get_resource_directory() / "bot" / "db" / "migrations"
+)
 
 
 class Database:
@@ -41,7 +45,7 @@ class Database:
                 DB 파일 생성 또는 연결에 실패한 경우.
         """
 
-        # DB 파일이 들어갈 data 폴더가 없으면 자동으로 생성한다.
+        # 데이터베이스 파일이 들어갈 data 폴더가 없으면 자동으로 생성한다.
         self.db_path.parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -54,18 +58,18 @@ class Database:
         # 조회 결과를 튜플이 아닌 컬럼 이름 기반으로 접근할 수 있게 한다.
         connection.row_factory = aiosqlite.Row
 
-        # SQLite는 기본적으로 외래키 검사를 끄고 시작하기 때문에
+        # 데이터베이스 엔진인 SQLite는 기본적으로 외래키 검사를 끄고 시작하므로
         # 연결마다 반드시 활성화해야 한다.
         await connection.execute(
             "PRAGMA foreign_keys = ON;"
         )
 
-        # WAL 모드는 읽기와 쓰기의 동시성을 개선한다.
+        # 저널의 WAL 모드는 읽기와 쓰기의 동시성을 개선한다.
         await connection.execute(
             "PRAGMA journal_mode = WAL;"
         )
 
-        # DB가 잠겨 있을 때 즉시 실패하지 않고 최대 5초 대기한다.
+        # 데이터베이스가 잠겨 있을 때 즉시 실패하지 않고 최대 5초 대기한다.
         await connection.execute(
             "PRAGMA busy_timeout = 5000;"
         )
@@ -240,7 +244,7 @@ class Database:
                     migration_script,
                 )
             except Exception:
-                # SQL 중간에 실패하면 열린 트랜잭션을 되돌린다.
+                # 실행 중인 SQL이 중간에 실패하면 열린 트랜잭션을 되돌린다.
                 await connection.rollback()
 
                 logger.exception(
