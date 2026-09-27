@@ -1,7 +1,7 @@
 """출석 기록의 음성 채널 참여 검증을 담당한다."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -36,6 +36,20 @@ class VerificationFinalizeResult:
     penalties: int = 0
 
 
+@dataclass(frozen=True)
+class VerificationOverview:
+    """`/출석 검증현황`에 표시할 오늘의 음성 검증 요약."""
+
+    configured: bool
+    enabled: bool = False
+    has_targets: bool = False
+    voice_channel_ids: list[str] = field(default_factory=list)
+    voice_category_ids: list[str] = field(default_factory=list)
+    timezone_name: str | None = None
+    session: dict[str, Any] | None = None
+    rows: list[dict[str, Any]] = field(default_factory=list)
+
+
 class VoiceVerificationService:
     """음성 로그, 출석 검증, 실패 감점을 조율한다."""
 
@@ -67,6 +81,7 @@ class VoiceVerificationService:
         checked_at: str,
         current_voice_channel_id: str | None,
         connection,
+        current_voice_category_id: str | None = None,
     ) -> int | None:
         """기능이 켜져 있으면 사용자 체크인에 대한 대기 검증을 생성한다.
 
@@ -101,7 +116,7 @@ class VoiceVerificationService:
         if current_voice_channel_id and self.is_configured_voice_channel(
             settings=settings,
             channel_id=current_voice_channel_id,
-            category_id=None,
+            category_id=current_voice_category_id,
         ):
             # 멤버가 /출석 실행 시점에 이미 검증 대상 음성 채널에 있었다면
             # 출석 시각(checked_at) 이후의 시간만 인정한다. Discord 이벤트만으로는
@@ -287,6 +302,66 @@ class VoiceVerificationService:
             verified=verified,
             failed=failed,
             penalties=penalties,
+        )
+
+    async def list_today_verifications(
+        self,
+        *,
+        guild_id: int | str,
+        now: datetime,
+    ) -> VerificationOverview:
+        """오늘 세션의 음성 검증 진행 상황을 운영자 확인용으로 모아 반환한다."""
+
+        require_aware(now)
+        guild_id_text = str(guild_id)
+        settings = await self.guild_repository.get_by_guild_id(guild_id_text)
+        if settings is None:
+            return VerificationOverview(configured=False)
+        overview = VerificationOverview(
+            configured=True,
+            enabled=bool(settings.get("voice_verification_enabled")),
+            has_targets=self._has_voice_targets(settings),
+            voice_channel_ids=sorted(self._parse_id_list(settings.get("voice_channel_ids"))),
+            voice_category_ids=sorted(self._parse_id_list(settings.get("voice_category_ids"))),
+            timezone_name=settings["timezone"],
+        )
+        attendance_date = get_server_today(now, settings["timezone"]).isoformat()
+        session = await self.session_repository.get_by_guild_and_date(
+            guild_id=guild_id_text,
+            attendance_date=attendance_date,
+        )
+        if session is None:
+            return overview
+        rows = await self.stage_a_repository.list_session_verifications(
+            session_id=int(session["id"]),
+        )
+        # 대기 중인 검증은 아직 열린 로그의 시간이 반영되지 않았을 수 있으므로
+        # 표시 시점 기준으로 누적 시간을 다시 계산한다.
+        connection = await self.stage_a_repository.database.connect()
+        try:
+            refreshed = []
+            for row in rows:
+                if row["status"] == "PENDING":
+                    row = {
+                        **row,
+                        "accumulated_seconds": await self._calculate_accumulated_seconds(
+                            verification=row,
+                            now=now,
+                            connection=connection,
+                        ),
+                    }
+                refreshed.append(row)
+        finally:
+            await connection.close()
+        return VerificationOverview(
+            configured=True,
+            enabled=overview.enabled,
+            has_targets=overview.has_targets,
+            voice_channel_ids=overview.voice_channel_ids,
+            voice_category_ids=overview.voice_category_ids,
+            timezone_name=overview.timezone_name,
+            session=session,
+            rows=refreshed,
         )
 
     def is_configured_voice_channel(

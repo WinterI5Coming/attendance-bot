@@ -338,6 +338,7 @@ def create_cogs(
             attendance_service=services.attendance,
             guild_service=services.guild,
             admin_service=services.admin,
+            voice_verification_service=services.voice_verification,
             time_provider=time_provider,
         ),
         ReportsCog(report_service=services.report, time_provider=time_provider),

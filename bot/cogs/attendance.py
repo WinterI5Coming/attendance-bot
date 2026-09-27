@@ -24,11 +24,13 @@ from bot.services.admin_service import (
 )
 from bot.services.attendance_service import AttendanceService
 from bot.services.guild_service import GuildService
+from bot.services.voice_verification_service import VoiceVerificationService
 from bot.ui.attendance_messages import (
     build_check_in_message,
     build_correction_message,
     build_status_embed,
-    current_voice_channel_id,
+    build_verification_overview_embed,
+    current_voice_location,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,7 @@ class AttendanceCog(commands.Cog):
         attendance_service: AttendanceService,
         guild_service: GuildService,
         admin_service: AdminService,
+        voice_verification_service: VoiceVerificationService,
         time_provider: TimeProvider | None = None,
     ) -> None:
         """Cog 의존성을 초기화한다."""
@@ -56,6 +59,7 @@ class AttendanceCog(commands.Cog):
         self.attendance_service = attendance_service
         self.guild_service = guild_service
         self.admin_service = admin_service
+        self.voice_verification_service = voice_verification_service
         self.time_provider = time_provider or TimeProvider()
 
     @attendance.command(name="체크인", description="오늘 출석 세션에 출석합니다. (공지의 출석하기 버튼과 동일)")
@@ -67,13 +71,15 @@ class AttendanceCog(commands.Cog):
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
+        voice_channel_id, voice_category_id = current_voice_location(interaction.user)
 
         try:
             result = await self.attendance_service.check_in(
                 guild_id=guild.id,
                 discord_id=interaction.user.id,
                 now=self.time_provider.now_utc(),
-                current_voice_channel_id=current_voice_channel_id(interaction.user),
+                current_voice_channel_id=voice_channel_id,
+                current_voice_category_id=voice_category_id,
             )
         except Exception:
             logger.exception(
@@ -111,6 +117,23 @@ class AttendanceCog(commands.Cog):
             return
 
         await interaction.response.send_message(embed=build_status_embed(result))
+
+    @attendance.command(name="검증현황", description="오늘 음성 검증 진행 상황(대기/성공/실패, 누적 시간)을 조회합니다.")
+    async def verification_status(self, interaction: discord.Interaction) -> None:
+        """/출석 검증현황 명령을 처리한다."""
+
+        if await require_officer(interaction, self.guild_service) is None:
+            return
+        guild = interaction.guild
+        assert guild is not None
+        overview = await self.voice_verification_service.list_today_verifications(
+            guild_id=guild.id,
+            now=self.time_provider.now_utc(),
+        )
+        await interaction.response.send_message(
+            embed=build_verification_overview_embed(overview),
+            ephemeral=True,
+        )
 
     @attendance.command(name="수정", description="간부가 특정 날짜의 출석 기록을 정정합니다.")
     @app_commands.rename(

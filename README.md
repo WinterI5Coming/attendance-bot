@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Discord.py](https://img.shields.io/badge/discord.py-slash%20commands-5865F2)
 ![SQLite](https://img.shields.io/badge/Database-SQLite-003B57)
-![Tests](https://img.shields.io/badge/tests-121%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-123%20passed-brightgreen)
 
 ## Table Of Contents
 
@@ -42,7 +42,7 @@ The bot is designed for communities that need repeatable attendance operations: 
 - 사유 신청: **입력창(모달)** 으로 신청 → 간부에게 접수 알림 → **[검토하기] 버튼**으로 승인/거절
 - 점수 장부: 출석 점수, 보정 점수, 평가 점수, 수동 조정, 취소 보정
 - 리포트: 내 정보, 공개 리포트, 랭킹, 주간 보고
-- Stage A: 음성 채널 체류 기반 출석 검증
+- 음성 검증(선택): 체크인 후 지정 음성 채널에 일정 시간 머물러야 검증 완료, 미달 시 감점
 - 상세 도움말: Discord 안에서 `/도움말`로 명령 사용법 확인
 
 ## Command Guide
@@ -161,6 +161,18 @@ python main.py
 | `REQUIRE_EXCUSE_APPROVAL` | No | `true` | New excuse requests require officer/admin approval |
 | `ALLOW_LATE_EXCUSE` | No | `false` | Registered members cannot submit after the cutoff |
 
+## Voice Verification
+
+체크인만으로는 실제 참여를 보장하지 못하므로, 켜 두면 체크인 이후 지정한 음성 채널(또는 카테고리)에 머문 시간을 누적해 검증합니다.
+
+- 켜기: `/설정 음성검증 사용:True 채널:#훈련음성` (카테고리로 지정하면 그 안의 모든 음성 채널 인정)
+- 규칙: 체크인 후 **60분** 이상 체류 시 검증 성공, 검증 마감은 **23:00**(서버 시간대). 체크인 전 체류 시간은 인정하지 않습니다.
+- 결과: 마감 시 미참여는 `NO_PARTICIPATION_PENALTY`(-2), 시간 부족은 `EARLY_LEAVE_PENALTY`(-1) 점수 이벤트가 추가되며 출석 기록 자체는 바뀌지 않습니다.
+- 확인: `/출석 검증현황`으로 오늘 대원별 대기/성공/실패와 누적 시간을 볼 수 있습니다.
+- 전제: Developer Portal에서 봇의 **Server Members Intent는 불필요**하지만, 봇이 음성 상태 이벤트를 받도록 `voice_states` intent(코드에서 활성화)가 허용되어야 하고, 대상 채널을 볼 수 있는 권한이 있어야 합니다.
+
+첫 도입 시 검증 절차: 음성 검증을 켜고 → 출석 공지 버튼으로 체크인 → 대상 음성 채널에 입장/퇴장 → `/출석 검증현황`에서 누적 시간이 늘어나는지 확인 → 23:00 이후 `/내정보`의 최근 점수 변동에서 검증 결과를 확인합니다.
+
 ## Excuse Deadline Policy
 
 기본 사유 신청 정책은 `Asia/Seoul` 기준 출석일 전날 23:00까지 신청, 관리자 승인 필수, 마감 이후 일반 사용자 신청 불가입니다.
@@ -226,7 +238,7 @@ python main.py
 .\venv\Scripts\python.exe -m ruff check bot tests main.py
 ```
 
-현재 검증 결과: `121 passed`
+현재 검증 결과: `123 passed`
 
 ## Operations Checklist
 
@@ -234,7 +246,7 @@ python main.py
 
 - Discord Developer Portal에서 Bot Token을 발급합니다.
 - Bot 권한에 `applications.commands`, 메시지 전송, 역할 관리 권한을 부여합니다.
-- Stage A 음성 검증을 사용할 경우 voice state intent를 활성화합니다.
+- 음성 검증을 쓸 경우 봇이 대상 음성 채널을 볼 수 있어야 합니다(`/설정 음성검증` 참고).
 - `/설정 초기화` 실행 후 `/도움말 카테고리:설정`을 확인합니다.
 - `/대원 등록`으로 출석 대상자를 등록합니다.
 

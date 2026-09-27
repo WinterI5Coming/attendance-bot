@@ -16,22 +16,89 @@ from bot.services.attendance_service import (
     AttendanceStatusResult,
 )
 from bot.services.session_service import SessionPrepareStatus
+from bot.services.voice_verification_service import VerificationOverview
 from bot.ui.embed_factory import EMBEDS
-from bot.ui.formatters import format_attendance_status, format_local_time, truncate
+from bot.ui.formatters import (
+    format_attendance_status,
+    format_local_time,
+    format_verification_failure,
+    format_verification_status,
+    truncate,
+)
 from bot.utils.time_utils import format_local_hhmm
 
 NOT_CONFIGURED_TEXT = "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /설정 초기화를 실행해주세요."
 
 
-def current_voice_channel_id(user: discord.abc.User) -> int | None:
-    """사용자가 현재 접속한 음성 채널 ID를 반환한다."""
+def current_voice_location(user: discord.abc.User) -> tuple[int | None, int | None]:
+    """사용자가 현재 접속한 음성 채널 ID와 그 카테고리 ID를 반환한다."""
 
     if not isinstance(user, discord.Member):
-        return None
+        return None, None
     voice_state = user.voice
     if voice_state is None or voice_state.channel is None:
-        return None
-    return voice_state.channel.id
+        return None, None
+    channel = voice_state.channel
+    category = getattr(channel, "category", None)
+    return channel.id, None if category is None else category.id
+
+
+VERIFICATION_STATUS_ICONS = {
+    "PENDING": "⏳",
+    "VERIFIED": "✅",
+    "FAILED": "❌",
+    "WAIVED": "🛡️",
+}
+
+
+def build_verification_overview_embed(overview: VerificationOverview) -> discord.Embed:
+    """`/출석 검증현황` Embed를 만든다."""
+
+    if not overview.configured:
+        return EMBEDS.error("음성 검증 현황", NOT_CONFIGURED_TEXT)
+    if not overview.enabled:
+        return EMBEDS.info(
+            "음성 검증 현황",
+            "음성 검증이 꺼져 있습니다. `/설정 음성검증 사용:True 채널:#음성채널`로 켤 수 있습니다.",
+        )
+    targets = [f"<#{channel_id}>" for channel_id in overview.voice_channel_ids] + [
+        f"카테고리 `{category_id}`" for category_id in overview.voice_category_ids
+    ]
+    if not overview.has_targets:
+        return EMBEDS.warning(
+            "음성 검증 현황",
+            "음성 검증은 켜져 있지만 대상 채널이 없어 동작하지 않습니다. "
+            "`/설정 음성검증 채널:#음성채널`로 대상을 지정하세요.",
+        )
+    if overview.session is None:
+        return EMBEDS.info(
+            "음성 검증 현황",
+            "오늘 출석 세션이 아직 없습니다.",
+            fields=(("검증 대상 채널", ", ".join(targets), False),),
+        )
+
+    session = overview.session
+    tz = overview.timezone_name or "Asia/Seoul"
+    required_minutes = int(session.get("required_voice_seconds") or 0) // 60
+    end_at = format_local_time(session.get("verification_end_at"), tz)
+    lines = []
+    for row in overview.rows:
+        icon = VERIFICATION_STATUS_ICONS.get(row["status"], "•")
+        minutes = int(row["accumulated_seconds"]) // 60
+        detail = f"{minutes}분 / {int(row['required_seconds']) // 60}분"
+        if row["status"] == "FAILED" and row.get("failure_reason"):
+            detail += f" · {format_verification_failure(row['failure_reason'])}"
+        lines.append(f"{icon} <@{row['discord_id']}> {format_verification_status(row['status'])} · {detail}")
+    counts = {status: sum(1 for row in overview.rows if row["status"] == status) for status in VERIFICATION_STATUS_ICONS}
+    return EMBEDS.info(
+        f"🎧 음성 검증 현황 ({session['attendance_date']})",
+        f"체크인 후 **{required_minutes}분** 이상 음성 채널 체류 시 검증 성공 · 검증 마감 **{end_at}**\n"
+        f"⏳ 대기 {counts['PENDING']} · ✅ 성공 {counts['VERIFIED']} · ❌ 실패 {counts['FAILED']}",
+        fields=(
+            ("검증 대상 채널", ", ".join(targets), False),
+            ("대상자", truncate("\n".join(lines) or "체크인한 대원이 없습니다."), False),
+        ),
+    )
 
 
 def _score_progress(result: AttendanceCheckInResult) -> str:

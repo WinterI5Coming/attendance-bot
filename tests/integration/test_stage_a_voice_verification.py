@@ -174,3 +174,76 @@ async def test_finalize_no_voice_join_creates_single_penalty(
     assert events[1]["reference_type"] == "VOICE_VERIFICATION"
     assert events[1]["dedup_key"] == "voice-verification:1:failure"
     assert await score_repository.get_total_score(member_id=member_id) == 1
+
+
+async def test_check_in_inside_configured_category_opens_voice_log(
+    database,
+    guild_repository,
+    member_repository,
+):
+    """카테고리로만 대상을 지정해도 체크인 시점의 음성 참여가 인정되어야 한다."""
+
+    await configure_guild(database, voice_verification_enabled=1, voice_channel_ids=None, voice_category_ids="555")
+    await create_member(member_repository, "2001", "A")
+    _, _, _, _, _, voice_service, attendance_service = build_services(
+        database,
+        guild_repository,
+        member_repository,
+    )
+
+    await attendance_service.check_in(
+        guild_id=GUILD_ID,
+        discord_id="2001",
+        now=utc_dt(12, 30),
+        current_voice_channel_id="999",
+        current_voice_category_id="555",
+    )
+    logs = await fetch_all(database, "SELECT * FROM voice_presence_logs;")
+    assert len(logs) == 1
+    assert logs[0]["left_at"] is None
+
+    result = await voice_service.finalize_due_verifications(now=utc_dt(14, 1))
+    verifications = await fetch_all(database, "SELECT * FROM attendance_verifications;")
+
+    assert result.verified == 1
+    assert verifications[0]["status"] == "VERIFIED"
+    # 체크인(21:30 KST)부터 검증 마감(23:00 KST)까지 90분이 인정된다.
+    assert verifications[0]["accumulated_seconds"] == 90 * 60
+
+
+async def test_today_verification_overview_reflects_live_accumulation(
+    database,
+    guild_repository,
+    member_repository,
+):
+    await configure_guild(database, voice_verification_enabled=1, voice_channel_ids="777", voice_category_ids=None)
+    await create_member(member_repository, "2001", "A")
+    await create_member(member_repository, "2002", "B")
+    _, _, _, _, _, voice_service, attendance_service = build_services(
+        database,
+        guild_repository,
+        member_repository,
+    )
+
+    await attendance_service.check_in(guild_id=GUILD_ID, discord_id="2001", now=utc_dt(12, 30))
+    await attendance_service.check_in(guild_id=GUILD_ID, discord_id="2002", now=utc_dt(12, 32))
+    await voice_service.handle_voice_update(
+        guild_id=GUILD_ID,
+        discord_id="2001",
+        before_channel_id=None,
+        before_category_id=None,
+        after_channel_id="777",
+        after_category_id=None,
+        now=utc_dt(12, 40),
+    )
+
+    overview = await voice_service.list_today_verifications(guild_id=GUILD_ID, now=utc_dt(13, 0))
+
+    assert overview.configured and overview.enabled and overview.has_targets
+    assert overview.voice_channel_ids == ["777"]
+    assert overview.session is not None
+    by_id = {row["discord_id"]: row for row in overview.rows}
+    assert by_id["2001"]["status"] == "PENDING"
+    assert by_id["2001"]["accumulated_seconds"] == 20 * 60
+    assert by_id["2002"]["accumulated_seconds"] == 0
+    assert by_id["2001"]["attendance_status"] == "PRESENT"

@@ -59,6 +59,21 @@ def format_attendance_status(status: str | None) -> str:
     return ATTENDANCE_STATUS_LABELS.get(status, status)
 
 
+VERIFICATION_FAILURE_LABELS = {
+    "NO_VOICE_JOIN": "음성 미참여",
+    "INSUFFICIENT_DURATION": "체류 시간 부족",
+    "ADMIN_REJECTED": "관리자 거절",
+}
+
+
+def format_verification_failure(reason: str | None) -> str:
+    """음성 검증 실패 사유 코드를 한국어 라벨로 바꾼다."""
+
+    if reason is None:
+        return "-"
+    return VERIFICATION_FAILURE_LABELS.get(reason, reason)
+
+
 def format_verification_status(status: str | None) -> str:
     """저장된 음성 검증 상태 코드를 한국어 라벨로 바꾼다."""
 

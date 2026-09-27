@@ -287,6 +287,7 @@ class AttendanceService:
         discord_id: int | str,
         now: datetime,
         current_voice_channel_id: int | str | None = None,
+        current_voice_category_id: int | str | None = None,
     ) -> AttendanceCheckInResult:
         """등록된 멤버를 오늘 출석 세션에 체크인한다.
 
@@ -417,6 +418,11 @@ class AttendanceService:
                 None
                 if current_voice_channel_id is None
                 else str(current_voice_channel_id)
+            ),
+            current_voice_category_id=(
+                None
+                if current_voice_category_id is None
+                else str(current_voice_category_id)
             ),
         )
 
@@ -629,6 +635,7 @@ class AttendanceService:
         checked_at: str,
         timezone_name: str | None,
         current_voice_channel_id: str | None = None,
+        current_voice_category_id: str | None = None,
     ) -> AttendanceCheckInResult:
         """출석 기록과 점수 행을 하나의 트랜잭션으로 생성한다.
 
@@ -706,6 +713,7 @@ class AttendanceService:
                     attendance_record=record,
                     checked_at=checked_at,
                     current_voice_channel_id=current_voice_channel_id,
+                    current_voice_category_id=current_voice_category_id,
                     connection=connection,
                 )
             score_delta = get_attendance_score(attendance_status)

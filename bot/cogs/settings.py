@@ -244,6 +244,78 @@ class SettingsCog(commands.Cog):
             ephemeral=True,
         )
 
+    @settings.command(name="음성검증", description="출석 후 음성 채널 체류 검증을 켜거나 끄고 대상 채널을 지정합니다.")
+    @app_commands.rename(enabled="사용", voice_channel="채널", category="카테고리")
+    @app_commands.describe(
+        enabled="True면 체크인 후 음성 채널 체류 시간을 검증합니다.",
+        voice_channel="검증 대상 음성 채널 (지정하면 기존 채널 목록을 대체)",
+        category="검증 대상 카테고리 (안의 모든 음성 채널 인정, 지정하면 기존 목록을 대체)",
+    )
+    async def configure_voice_verification(
+        self,
+        interaction: discord.Interaction,
+        enabled: bool,
+        voice_channel: discord.VoiceChannel | None = None,
+        category: discord.CategoryChannel | None = None,
+    ) -> None:
+        """/설정 음성검증 명령을 처리한다."""
+
+        settings = await require_officer(interaction, self.guild_service)
+        if settings is None:
+            return
+        guild = interaction.guild
+        assert guild is not None
+
+        updates: list[tuple[str, str]] = [("voice_verification_enabled", "1" if enabled else "0")]
+        if voice_channel is not None:
+            updates.append(("voice_channel_ids", str(voice_channel.id)))
+        if category is not None:
+            updates.append(("voice_category_ids", str(category.id)))
+
+        has_targets = bool(
+            voice_channel or category or settings.get("voice_channel_ids") or settings.get("voice_category_ids")
+        )
+        if enabled and not has_targets:
+            await interaction.response.send_message(
+                "⚠️ 검증 대상 음성 채널 또는 카테고리를 함께 지정해주세요.",
+                ephemeral=True,
+            )
+            return
+
+        for db_field, value in updates:
+            result = await self.admin_service.update_setting(
+                guild_id=guild.id,
+                field=db_field,
+                value=value,
+                actor_discord_id=interaction.user.id,
+                has_permission=True,
+                now=self.time_provider.now_utc(),
+            )
+            if result.status is not SettingsUpdateStatus.UPDATED:
+                await interaction.response.send_message(
+                    self._settings_update_message(result),
+                    ephemeral=True,
+                )
+                return
+
+        updated = await self.guild_service.get_settings(guild.id) or settings
+        targets = [f"<#{cid}>" for cid in (updated.get("voice_channel_ids") or "").split(",") if cid] + [
+            f"카테고리 <#{cid}>" for cid in (updated.get("voice_category_ids") or "").split(",") if cid
+        ]
+        await interaction.response.send_message(
+            embed=EMBEDS.success(
+                "음성 검증 설정 저장",
+                "체크인 후 정해진 시간 이상 음성 채널에 머물러야 검증이 완료됩니다. "
+                "미참여/부족 시 감점이 별도 이벤트로 기록됩니다.",
+                fields=(
+                    ("사용 여부", "켜짐" if enabled else "꺼짐", True),
+                    ("대상", ", ".join(targets) or "없음", False),
+                    ("확인", "`/출석 검증현황`으로 오늘 진행 상황을 볼 수 있습니다.", False),
+                ),
+            ),
+            ephemeral=True,
+        )
+
     def _settings_update_message(self, result: SettingsUpdateResult) -> str:
         """설정 변경 결과를 사용자 응답 문자열로 변환한다."""
 

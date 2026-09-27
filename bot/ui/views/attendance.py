@@ -9,7 +9,7 @@ import discord
 from bot.cogs.common import GUILD_ONLY_MESSAGE
 from bot.runtime.time_provider import TimeProvider
 from bot.services.attendance_service import AttendanceService
-from bot.ui.attendance_messages import build_check_in_message, current_voice_channel_id
+from bot.ui.attendance_messages import build_check_in_message, current_voice_location
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +60,14 @@ class CheckInView(discord.ui.View):
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
+        voice_channel_id, voice_category_id = current_voice_location(interaction.user)
         try:
             result = await self.attendance_service.check_in(
                 guild_id=guild.id,
                 discord_id=interaction.user.id,
                 now=self.time_provider.now_utc(),
-                current_voice_channel_id=current_voice_channel_id(interaction.user),
+                current_voice_channel_id=voice_channel_id,
+                current_voice_category_id=voice_category_id,
             )
         except Exception:
             logger.exception(

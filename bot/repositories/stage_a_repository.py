@@ -180,6 +180,36 @@ class StageARepository:
             if owns_connection:
                 await connection.close()
 
+    async def list_session_verifications(
+        self,
+        *,
+        session_id: int,
+    ) -> list[dict[str, Any]]:
+        """세션 하나의 검증 행을 멤버 정보와 함께 이름순으로 반환한다."""
+
+        connection = await self.database.connect()
+        try:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    av.*,
+                    m.discord_id,
+                    m.display_name,
+                    ar.status AS attendance_status
+                FROM attendance_verifications AS av
+                JOIN members AS m ON m.id = av.member_id
+                JOIN attendance_records AS ar ON ar.id = av.attendance_record_id
+                WHERE av.session_id = ?
+                ORDER BY m.display_name COLLATE NOCASE;
+                """,
+                (session_id,),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            return [dict(row) for row in rows]
+        finally:
+            await connection.close()
+
     async def list_pending_verifications(
         self,
         *,

@@ -76,6 +76,13 @@ GUIDE_CATEGORIES: tuple[GuideCategory, ...] = (
                 permission=ADMIN,
                 parameters="HH:MM 형식의 출석시작, 지각기준, 마감시간",
             ),
+            CommandGuide(
+                name="/설정 음성검증",
+                summary="체크인 후 음성 채널에 일정 시간(기본 60분, 23:00 마감) 머물러야 출석이 검증되도록 설정합니다.",
+                usage="/설정 음성검증 사용:True 채널:#훈련음성",
+                permission=OFFICER,
+                parameters="사용, 채널(선택), 카테고리(선택)",
+            ),
         ),
     ),
     GuideCategory(
@@ -150,6 +157,13 @@ GUIDE_CATEGORIES: tuple[GuideCategory, ...] = (
                 name="/출석 오늘재개",
                 summary="취소된 오늘 출석 세션을 다시 엽니다.",
                 usage="/출석 오늘재개",
+                permission=OFFICER,
+                parameters="없음",
+            ),
+            CommandGuide(
+                name="/출석 검증현황",
+                summary="음성 검증이 켜진 서버에서 오늘 대원별 검증 상태(대기/성공/실패)와 누적 체류 시간을 봅니다.",
+                usage="/출석 검증현황",
                 permission=OFFICER,
                 parameters="없음",
             ),
