@@ -1,6 +1,5 @@
 """Stage C 간부 인사 검토 슬래시 명령어를 제공한다."""
 
-from datetime import datetime, timezone
 import json
 import logging
 
@@ -8,10 +7,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import (
+    NOT_CONFIGURED_MESSAGE,
+    require_guild,
+    require_guild_settings,
+    require_officer,
+    require_server_admin,
+)
+from bot.runtime.time_provider import TimeProvider
 from bot.services.guild_service import GuildService
 from bot.services.stage_c_service import OfficerReviewService
-from bot.utils.permissions import has_officer_permission, is_server_admin
-
 
 logger = logging.getLogger(__name__)
 
@@ -24,23 +29,24 @@ class OfficerReviewsCog(commands.Cog):
         *,
         guild_service: GuildService,
         officer_review_service: OfficerReviewService,
+        time_provider: TimeProvider | None = None,
     ) -> None:
         """Cog가 사용할 서버 설정 서비스와 간부 인사 서비스를 저장한다."""
 
         self.guild_service = guild_service
         self.officer_review_service = officer_review_service
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(name="간부평가기준", description="간부 평가 설정을 조회합니다.")
     @app_commands.guild_only()
     async def show_settings(self, interaction: discord.Interaction) -> None:
         """현재 서버의 간부 평가 기준과 자동화 설정을 조회한다."""
 
-        if interaction.guild_id is None:
-            await interaction.response.send_message("서버에서만 사용할 수 있습니다.", ephemeral=True)
+        if await require_guild(interaction) is None:
             return
         settings = await self.officer_review_service.get_settings(
             guild_id=interaction.guild_id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         lines = [
             "간부 평가 설정",
@@ -69,8 +75,7 @@ class OfficerReviewsCog(commands.Cog):
     ) -> None:
         """서버 관리자가 간부 평가 기준과 역할 ID를 변경한다."""
 
-        if not is_server_admin(interaction):
-            await interaction.response.send_message("서버 관리자 권한이 필요합니다.", ephemeral=True)
+        if await require_server_admin(interaction) is None:
             return
         values = {
             "enabled": 1 if enabled else 0,
@@ -86,7 +91,7 @@ class OfficerReviewsCog(commands.Cog):
         await self.officer_review_service.update_settings(
             guild_id=interaction.guild_id,
             values=values,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message("간부 평가 기준을 저장했습니다.", ephemeral=True)
 
@@ -99,17 +104,17 @@ class OfficerReviewsCog(commands.Cog):
     ) -> None:
         """현재 시즌 통계를 기준으로 역할 변경 없는 간부 인사안을 생성한다."""
 
-        if not await self._ensure_officer(interaction):
+        settings = await require_officer(interaction, self.guild_service)
+        if settings is None:
             return
         await interaction.response.defer(ephemeral=True)
-        settings = await self.guild_service.get_settings(interaction.guild_id)
         officer_settings = await self.officer_review_service.get_settings(
             guild_id=interaction.guild_id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
-        officer_role = self._get_role(interaction.guild, officer_settings, "officer_role_id")
-        if officer_role is None:
-            officer_role = self._get_role(interaction.guild, settings, "officer_role_id")
+        officer_role = self._resolve_officer_role(
+            interaction.guild, officer_settings, settings
+        )
         current_officers = set()
         if officer_role is not None:
             current_officers = {str(member.id) for member in officer_role.members}
@@ -120,7 +125,7 @@ class OfficerReviewsCog(commands.Cog):
             current_officer_discord_ids=current_officers,
             protected_discord_ids=protected,
             created_by_discord_id=interaction.user.id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.followup.send(
             self._build_preview_message(result),
@@ -136,17 +141,13 @@ class OfficerReviewsCog(commands.Cog):
     ) -> None:
         """저장된 간부 인사 미리보기를 실제 Discord 역할 변경으로 적용한다."""
 
-        if not is_server_admin(interaction):
-            await interaction.response.send_message("서버 관리자 권한이 필요합니다.", ephemeral=True)
+        if await require_server_admin(interaction) is None:
             return
-        if interaction.guild is None or interaction.guild_id is None:
-            await interaction.response.send_message("서버에서만 사용할 수 있습니다.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        settings = await self.guild_service.get_settings(interaction.guild_id)
+        settings = await require_guild_settings(interaction, self.guild_service)
         if settings is None:
-            await interaction.followup.send("초기 설정이 필요합니다.", ephemeral=True)
             return
+        assert interaction.guild is not None and interaction.guild_id is not None
+        await interaction.response.defer(ephemeral=True)
         review = await self.officer_review_service.get_review(
             guild_id=interaction.guild_id,
             review_id=review_id,
@@ -156,11 +157,11 @@ class OfficerReviewsCog(commands.Cog):
             return
         officer_settings = await self.officer_review_service.get_settings(
             guild_id=interaction.guild_id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
-        officer_role = self._get_role(interaction.guild, officer_settings, "officer_role_id")
-        if officer_role is None:
-            officer_role = self._get_role(interaction.guild, settings, "officer_role_id")
+        officer_role = self._resolve_officer_role(
+            interaction.guild, officer_settings, settings
+        )
         member_role = self._get_role(interaction.guild, officer_settings, "member_role_id")
         if officer_role is None:
             await interaction.followup.send("간부 역할 설정을 찾지 못했습니다.", ephemeral=True)
@@ -205,18 +206,26 @@ class OfficerReviewsCog(commands.Cog):
             elif status == "FAILED":
                 failures += 1
 
+            member_role_id = None if member_role is None else member_role.id
+            if item["action"] == "PROMOTE":
+                from_role_id, to_role_id = member_role_id, officer_role.id
+            elif item["action"] == "DEMOTE":
+                from_role_id, to_role_id = officer_role.id, member_role_id
+            else:
+                from_role_id = to_role_id = member_role_id
+
             await self.officer_review_service.log_role_change(
                 guild_id=interaction.guild_id,
                 review_id=review_id,
                 member_id=item.get("member_id"),
                 discord_id=discord_id,
                 action_type=item["action"],
-                from_role_id=officer_role.id if item["action"] == "DEMOTE" else member_role.id if member_role else None,
-                to_role_id=officer_role.id if item["action"] == "PROMOTE" else member_role.id if member_role else None,
+                from_role_id=from_role_id,
+                to_role_id=to_role_id,
                 status=status,
                 reason=reason,
                 error_message=error_message,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
 
         final_status = "COMPLETED" if failures == 0 else "PARTIAL"
@@ -225,7 +234,7 @@ class OfficerReviewsCog(commands.Cog):
             review_id=review_id,
             status=final_status,
             executed_by_discord_id=interaction.user.id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.followup.send(
             f"간부 인사안을 실행했습니다. 성공 {successes}건, 실패 {failures}건",
@@ -237,7 +246,7 @@ class OfficerReviewsCog(commands.Cog):
     async def role_change_logs(self, interaction: discord.Interaction) -> None:
         """최근 간부 역할 변경 성공/실패 이력을 조회한다."""
 
-        if not await self._ensure_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
         logs = await self.officer_review_service.list_role_change_logs(
             guild_id=interaction.guild_id,
@@ -253,18 +262,18 @@ class OfficerReviewsCog(commands.Cog):
             )
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-    async def _ensure_officer(self, interaction: discord.Interaction) -> bool:
-        """명령 실행자가 간부 또는 서버 관리자인지 확인한다."""
+    def _resolve_officer_role(
+        self,
+        guild: discord.Guild | None,
+        officer_settings: dict | None,
+        guild_settings: dict | None,
+    ) -> discord.Role | None:
+        """간부 평가 설정의 역할을 우선 사용하고, 없으면 서버 기본 간부 역할로 대체한다."""
 
-        if interaction.guild is None or interaction.guild_id is None:
-            await interaction.response.send_message("서버에서만 사용할 수 있습니다.", ephemeral=True)
-            return False
-        settings = await self.guild_service.get_settings(interaction.guild_id)
-        officer_role_id = None if settings is None else settings["officer_role_id"]
-        if not has_officer_permission(interaction, officer_role_id):
-            await interaction.response.send_message("간부 권한이 필요합니다.", ephemeral=True)
-            return False
-        return True
+        role = self._get_role(guild, officer_settings, "officer_role_id")
+        if role is None:
+            role = self._get_role(guild, guild_settings, "officer_role_id")
+        return role
 
     def _get_role(
         self,
@@ -297,7 +306,7 @@ class OfficerReviewsCog(commands.Cog):
         """간부 인사 미리보기 결과를 사용자 응답 문자열로 변환한다."""
 
         if not result.configured:
-            return "초기 설정이 필요합니다."
+            return NOT_CONFIGURED_MESSAGE
         if not result.enabled:
             return "간부 평가가 비활성화되어 있습니다."
         candidates = result.candidates or []

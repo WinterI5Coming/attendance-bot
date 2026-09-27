@@ -1,12 +1,13 @@
 """관리자 설정과 당일 세션 제어 슬래시 명령어를 제공한다."""
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import has_officer_access, require_officer
+from bot.runtime.time_provider import TimeProvider
 from bot.services.admin_service import (
     AdminService,
     SessionControlResult,
@@ -15,8 +16,6 @@ from bot.services.admin_service import (
     SettingsUpdateStatus,
 )
 from bot.services.guild_service import GuildService
-from bot.utils.permissions import has_officer_permission
-
 
 logger = logging.getLogger(__name__)
 
@@ -29,25 +28,21 @@ class SettingsCog(commands.Cog):
         *,
         admin_service: AdminService,
         guild_service: GuildService,
+        time_provider: TimeProvider | None = None,
     ) -> None:
         """Cog가 사용할 관리자 서비스와 서버 설정 서비스를 저장한다."""
 
         self.admin_service = admin_service
         self.guild_service = guild_service
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(name="설정조회", description="현재 근태관리 설정을 조회합니다.")
     @app_commands.guild_only()
     async def show_settings(self, interaction: discord.Interaction) -> None:
         """/설정조회 명령을 처리한다."""
 
-        if not await self._has_permission(interaction):
-            await interaction.response.send_message("관리 권한이 필요합니다.", ephemeral=True)
-            return
-        guild = interaction.guild
-        assert guild is not None
-        settings = await self.guild_service.get_settings(guild.id)
+        settings = await require_officer(interaction, self.guild_service)
         if settings is None:
-            await interaction.response.send_message("초기설정이 필요합니다.", ephemeral=True)
             return
         await interaction.response.send_message(
             (
@@ -96,7 +91,7 @@ class SettingsCog(commands.Cog):
     ) -> None:
         """/설정변경 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         try:
@@ -106,7 +101,7 @@ class SettingsCog(commands.Cog):
                 value=value,
                 actor_discord_id=interaction.user.id,
                 has_permission=permission,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception("Setting update failed: guild_id=%s", guild.id)
@@ -130,7 +125,7 @@ class SettingsCog(commands.Cog):
     ) -> None:
         """/오늘출석취소 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         result = await self.admin_service.cancel_today_session(
@@ -138,7 +133,7 @@ class SettingsCog(commands.Cog):
             reason=reason,
             actor_discord_id=interaction.user.id,
             has_permission=permission,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._session_message(result),
@@ -150,30 +145,19 @@ class SettingsCog(commands.Cog):
     async def resume_today(self, interaction: discord.Interaction) -> None:
         """/오늘출석재개 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         result = await self.admin_service.resume_today_session(
             guild_id=guild.id,
             actor_discord_id=interaction.user.id,
             has_permission=permission,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._session_message(result),
             ephemeral=True,
         )
-
-    async def _has_permission(self, interaction: discord.Interaction) -> bool:
-        """명령 실행자가 설정 변경 권한을 갖고 있는지 확인한다."""
-
-        guild = interaction.guild
-        if guild is None:
-            return False
-        settings = await self.guild_service.get_settings(guild.id)
-        if settings is None:
-            return False
-        return has_officer_permission(interaction, settings["officer_role_id"])
 
     def _settings_update_message(self, result: SettingsUpdateResult) -> str:
         """설정 변경 결과를 사용자 응답 문자열로 변환한다."""

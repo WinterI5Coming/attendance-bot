@@ -1,6 +1,6 @@
 """Tests for excuse deadline policy calculations."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from bot.services.excuse_policy import ExcusePolicy, ExcusePolicyService
@@ -29,17 +29,17 @@ def test_can_submit_before_but_not_at_or_after_deadline():
     target_date = date(2026, 7, 2)
 
     before, _ = service.can_submit(
-        now=datetime(2026, 7, 1, 13, 59, 59, tzinfo=timezone.utc),
+        now=datetime(2026, 7, 1, 13, 59, 59, tzinfo=UTC),
         target_date=target_date,
         policy=policy,
     )
     exact, _ = service.can_submit(
-        now=datetime(2026, 7, 1, 14, 0, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 7, 1, 14, 0, 0, tzinfo=UTC),
         target_date=target_date,
         policy=policy,
     )
     after, _ = service.can_submit(
-        now=datetime(2026, 7, 1, 14, 0, 1, tzinfo=timezone.utc),
+        now=datetime(2026, 7, 1, 14, 0, 1, tzinfo=UTC),
         target_date=target_date,
         policy=policy,
     )

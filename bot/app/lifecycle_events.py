@@ -7,8 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from bot.bot_client import AttendanceBot
-
+from bot.app.client import AttendanceBot
 
 logger = logging.getLogger(__name__)
 

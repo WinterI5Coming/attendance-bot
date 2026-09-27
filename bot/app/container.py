@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 
 from discord.ext import commands
 
 from bot.cogs.achievements import AchievementsCog
-from bot.cogs.attendance import AttendanceCog
 from bot.cogs.adjustments import AdjustmentsCog
+from bot.cogs.attendance import AttendanceCog
 from bot.cogs.evaluations import EvaluationsCog
 from bot.cogs.excuses import ExcusesCog
 from bot.cogs.help import HelpCog
@@ -54,7 +54,6 @@ from bot.services.stage_c_service import (
 )
 from bot.services.streak_service import StreakService
 from bot.services.voice_verification_service import VoiceVerificationService
-
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +123,7 @@ def create_bot_container(settings: Settings) -> BotContainer:
     """
 
     database = Database(settings.db_path)
-    time_provider = TimeProvider(local_timezone=settings.timezone)
+    time_provider = TimeProvider()
     repositories = create_repositories(database)
     services = create_services(settings=settings, repositories=repositories)
     attendance_scheduler, backup_scheduler = create_schedulers(
@@ -133,7 +132,11 @@ def create_bot_container(settings: Settings) -> BotContainer:
         services=services,
         time_provider=time_provider,
     )
-    cogs = create_cogs(settings=settings, services=services)
+    cogs = create_cogs(
+        settings=settings,
+        services=services,
+        time_provider=time_provider,
+    )
 
     return BotContainer(
         database=database,
@@ -334,13 +337,19 @@ def create_schedulers(
     return attendance_scheduler, backup_scheduler
 
 
-def create_cogs(*, settings: Settings, services: ServiceSet) -> list[commands.Cog]:
+def create_cogs(
+    *,
+    settings: Settings,
+    services: ServiceSet,
+    time_provider: TimeProvider,
+) -> list[commands.Cog]:
     """
     기능별 Discord Cog를 생성한다.
 
     Args:
         settings: 선택 기능 활성화 여부를 담은 실행 설정.
         services: Cog가 호출할 애플리케이션 서비스 묶음.
+        time_provider: 모든 Cog가 공유하는 현재 시각 공급자.
 
     Returns:
         Discord 클라이언트에 등록할 Cog 목록.
@@ -348,7 +357,7 @@ def create_cogs(*, settings: Settings, services: ServiceSet) -> list[commands.Co
 
     cogs: list[commands.Cog] = [
         HelpCog(),
-        SetupCog(guild_service=services.guild),
+        SetupCog(guild_service=services.guild, time_provider=time_provider),
         MembersCog(
             guild_service=services.guild,
             member_service=services.member,
@@ -356,31 +365,38 @@ def create_cogs(*, settings: Settings, services: ServiceSet) -> list[commands.Co
         AttendanceCog(
             attendance_service=services.attendance,
             guild_service=services.guild,
+            time_provider=time_provider,
         ),
-        ReportsCog(report_service=services.report),
+        ReportsCog(report_service=services.report, time_provider=time_provider),
         ExcusesCog(
             excuse_service=services.excuse,
             guild_service=services.guild,
+            time_provider=time_provider,
         ),
         EvaluationsCog(
             evaluation_service=services.evaluation,
             guild_service=services.guild,
+            time_provider=time_provider,
         ),
         SettingsCog(
             admin_service=services.admin,
             guild_service=services.guild,
+            time_provider=time_provider,
         ),
         AdjustmentsCog(
             adjustment_service=services.adjustment,
             guild_service=services.guild,
+            time_provider=time_provider,
         ),
         VoiceTrackingCog(
             voice_verification_service=services.voice_verification,
+            time_provider=time_provider,
         ),
         AchievementsCog(
             guild_service=services.guild,
             achievement_service=services.achievement,
             enable_season_awards=settings.enable_seasons,
+            time_provider=time_provider,
         ),
     ]
 
@@ -390,10 +406,12 @@ def create_cogs(*, settings: Settings, services: ServiceSet) -> list[commands.Co
                 SeasonsCog(
                     guild_service=services.guild,
                     season_service=services.season,
+                    time_provider=time_provider,
                 ),
                 OfficerReviewsCog(
                     guild_service=services.guild,
                     officer_review_service=services.officer_review,
+                    time_provider=time_provider,
                 ),
             ]
         )

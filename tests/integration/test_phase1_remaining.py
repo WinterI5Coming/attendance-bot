@@ -1,11 +1,19 @@
 """Integration tests for Phase 1 closing, recovery, reports, and corrections."""
 
-from datetime import datetime, timezone
 
-import pytest
+from tests.helpers import (
+    ADMIN_ID,
+    GUILD_ID,
+    FakeGuildService,
+    configure_guild,
+    count_rows,
+    create_member,
+    list_sessions,
+    utc_dt,
+)
 
-from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.attendance_repository import AttendanceRepository
+from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.report_repository import ReportRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
@@ -16,45 +24,6 @@ from bot.services.attendance_service import (
 )
 from bot.services.report_service import ReportService
 from bot.services.session_service import SessionCloseStatus, SessionService
-
-
-GUILD_ID = "111"
-ADMIN_ID = "9001"
-
-
-def utc_dt(day: int, hour: int, minute: int, second: int = 0) -> datetime:
-    return datetime(2026, 7, day, hour, minute, second, tzinfo=timezone.utc)
-
-
-async def configure_daily(database):
-    connection = await database.connect()
-    try:
-        await connection.execute(
-            """
-            UPDATE guild_settings
-            SET
-                attendance_days = 'MON,TUE,WED,THU,FRI,SAT,SUN',
-                attendance_start = '21:30',
-                late_deadline = '21:40',
-                close_deadline = '21:45',
-                timezone = 'Asia/Seoul'
-            WHERE guild_id = ?;
-            """,
-            (GUILD_ID,),
-        )
-        await connection.commit()
-    finally:
-        await connection.close()
-
-
-async def create_member(member_repository, discord_id: str, name: str) -> int:
-    return await member_repository.create(
-        guild_id=GUILD_ID,
-        discord_id=discord_id,
-        display_name=name,
-        created_by_discord_id=ADMIN_ID,
-        now="2026-07-01T00:00:00+00:00",
-    )
 
 
 def build_all(database, guild_repository, member_repository, guild_service=None):
@@ -93,44 +62,12 @@ def build_all(database, guild_repository, member_repository, guild_service=None)
     return session_service, attendance_service, report_service, scheduler
 
 
-class FakeGuildService:
-    """Tiny scheduler test double that exposes configured guild settings."""
-
-    def __init__(self, guild_repository):
-        self.guild_repository = guild_repository
-
-    async def list_all_settings(self):
-        return await self.guild_repository.list_all_settings()
-
-
-async def count_rows(database, table: str) -> int:
-    connection = await database.connect()
-    try:
-        cursor = await connection.execute(f"SELECT COUNT(*) AS count FROM {table};")
-        row = await cursor.fetchone()
-        await cursor.close()
-        return int(row["count"])
-    finally:
-        await connection.close()
-
-
-async def get_session(database):
-    connection = await database.connect()
-    try:
-        rows = await connection.execute_fetchall(
-            "SELECT * FROM attendance_sessions ORDER BY id;"
-        )
-        return [dict(row) for row in rows]
-    finally:
-        await connection.close()
-
-
 async def test_scheduler_auto_creates_opens_and_skips_duplicate(
     database,
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     await create_member(member_repository, "2002", "B")
     inactive_id = await create_member(member_repository, "2003", "C")
@@ -147,19 +84,19 @@ async def test_scheduler_auto_creates_opens_and_skips_duplicate(
         FakeGuildService(guild_repository),
     )
 
-    await scheduler.run_once(utc_dt(2, 12, 0))
-    await scheduler.run_once(utc_dt(2, 12, 0))
-    sessions = await get_session(database)
+    await scheduler.run_once(utc_dt(12, 0, day=2))
+    await scheduler.run_once(utc_dt(12, 0, day=2))
+    sessions = await list_sessions(database)
     assert len(sessions) == 1
     assert sessions[0]["status"] == "SCHEDULED"
 
-    await scheduler.run_once(utc_dt(2, 12, 30))
-    sessions = await get_session(database)
+    await scheduler.run_once(utc_dt(12, 30, day=2))
+    sessions = await list_sessions(database)
     opened_at = sessions[0]["opened_at"]
     assert sessions[0]["status"] == "OPEN"
 
-    await scheduler.run_once(utc_dt(2, 12, 31))
-    sessions = await get_session(database)
+    await scheduler.run_once(utc_dt(12, 31, day=2))
+    sessions = await list_sessions(database)
     assert sessions[0]["opened_at"] == opened_at
 
     connection = await database.connect()
@@ -177,7 +114,7 @@ async def test_auto_close_creates_absent_scores_and_is_idempotent(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     await create_member(member_repository, "2002", "B")
     await create_member(member_repository, "2003", "C")
@@ -191,33 +128,33 @@ async def test_auto_close_creates_absent_scores_and_is_idempotent(
     await attendance_service.check_in(
         guild_id=GUILD_ID,
         discord_id="2001",
-        now=utc_dt(2, 12, 30),
+        now=utc_dt(12, 30, day=2),
     )
     await attendance_service.check_in(
         guild_id=GUILD_ID,
         discord_id="2002",
-        now=utc_dt(2, 12, 40),
+        now=utc_dt(12, 40, day=2),
     )
 
-    sessions = await get_session(database)
+    sessions = await list_sessions(database)
     result = await session_service.close_session(
         session_id=sessions[0]["id"],
-        now=utc_dt(2, 12, 46),
+        now=utc_dt(12, 46, day=2),
     )
     assert result.status is SessionCloseStatus.CLOSED
     assert result.newly_absent_count == 2
     assert await count_rows(database, "attendance_records") == 4
     assert await count_rows(database, "score_events") == 4
 
-    closed_at = (await get_session(database))[0]["closed_at"]
+    closed_at = (await list_sessions(database))[0]["closed_at"]
     second = await session_service.close_session(
         session_id=sessions[0]["id"],
-        now=utc_dt(2, 12, 50),
+        now=utc_dt(12, 50, day=2),
     )
     assert second.status is SessionCloseStatus.ALREADY_CLOSED
     assert await count_rows(database, "attendance_records") == 4
     assert await count_rows(database, "score_events") == 4
-    assert (await get_session(database))[0]["closed_at"] == closed_at
+    assert (await list_sessions(database))[0]["closed_at"] == closed_at
 
 
 async def test_recovery_closes_overdue_open_session_once(
@@ -225,18 +162,18 @@ async def test_recovery_closes_overdue_open_session_once(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     await create_member(member_repository, "2002", "B")
     session_service, _, _, _ = build_all(database, guild_repository, member_repository)
     prepared = await session_service.prepare_today_session(
         guild_id=GUILD_ID,
-        now=utc_dt(2, 12, 30),
+        now=utc_dt(12, 30, day=2),
     )
 
-    recovery = await session_service.process_overdue_sessions(now=utc_dt(2, 12, 46))
-    again = await session_service.process_overdue_sessions(now=utc_dt(2, 12, 47))
-    session = (await get_session(database))[0]
+    recovery = await session_service.process_overdue_sessions(now=utc_dt(12, 46, day=2))
+    again = await session_service.process_overdue_sessions(now=utc_dt(12, 47, day=2))
+    session = (await list_sessions(database))[0]
 
     assert prepared.session["status"] == "OPEN"
     assert recovery.processed_sessions == 1
@@ -250,7 +187,7 @@ async def test_personal_report_summary_and_zero_rate(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     await create_member(member_repository, "2002", "B")
     session_service, attendance_service, report_service, _ = build_all(
@@ -262,9 +199,9 @@ async def test_personal_report_summary_and_zero_rate(
     await attendance_service.check_in(
         guild_id=GUILD_ID,
         discord_id="2001",
-        now=utc_dt(2, 12, 30),
+        now=utc_dt(12, 30, day=2),
     )
-    await session_service.close_session(session_id=(await get_session(database))[0]["id"], now=utc_dt(2, 12, 46))
+    await session_service.close_session(session_id=(await list_sessions(database))[0]["id"], now=utc_dt(12, 46, day=2))
     report = await report_service.get_my_report(guild_id=GUILD_ID, discord_id="2001")
     zero = await report_service.get_my_report(guild_id=GUILD_ID, discord_id="2002")
 
@@ -285,7 +222,7 @@ async def test_attendance_correction_updates_score_and_audit(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     session_service, _, _, _ = build_all(database, guild_repository, member_repository)
     attendance_repository = AttendanceRepository(database=database)
@@ -302,9 +239,9 @@ async def test_attendance_correction_updates_score_and_audit(
     )
     prepared = await session_service.prepare_today_session(
         guild_id=GUILD_ID,
-        now=utc_dt(2, 12, 30),
+        now=utc_dt(12, 30, day=2),
     )
-    await session_service.close_session(session_id=prepared.session["id"], now=utc_dt(2, 12, 46))
+    await session_service.close_session(session_id=prepared.session["id"], now=utc_dt(12, 46, day=2))
 
     result = await attendance_service.correct_attendance(
         guild_id=GUILD_ID,
@@ -313,7 +250,7 @@ async def test_attendance_correction_updates_score_and_audit(
         new_status="PRESENT",
         reason="입력 실수",
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(2, 13, 0),
+        now=utc_dt(13, 0, day=2),
     )
     same = await attendance_service.correct_attendance(
         guild_id=GUILD_ID,
@@ -322,7 +259,7 @@ async def test_attendance_correction_updates_score_and_audit(
         new_status="PRESENT",
         reason="입력 실수",
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(2, 13, 1),
+        now=utc_dt(13, 1, day=2),
     )
 
     assert result.status is AttendanceCorrectionStatus.UPDATED
@@ -338,14 +275,14 @@ async def test_attendance_correction_creates_new_admin_record(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     session_service, attendance_service, _, _ = build_all(
         database,
         guild_repository,
         member_repository,
     )
-    await session_service.prepare_today_session(guild_id=GUILD_ID, now=utc_dt(2, 12, 30))
+    await session_service.prepare_today_session(guild_id=GUILD_ID, now=utc_dt(12, 30, day=2))
 
     result = await attendance_service.correct_attendance(
         guild_id=GUILD_ID,
@@ -354,7 +291,7 @@ async def test_attendance_correction_creates_new_admin_record(
         new_status="ABSENT",
         reason="봇 장애",
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(2, 13, 0),
+        now=utc_dt(13, 0, day=2),
     )
 
     assert result.status is AttendanceCorrectionStatus.CREATED
@@ -368,7 +305,7 @@ async def test_correction_rejects_future_and_non_session_member(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     await create_member(member_repository, "2002", "B")
     session_service, attendance_service, _, _ = build_all(
@@ -376,7 +313,7 @@ async def test_correction_rejects_future_and_non_session_member(
         guild_repository,
         member_repository,
     )
-    await session_service.prepare_today_session(guild_id=GUILD_ID, now=utc_dt(2, 12, 30))
+    await session_service.prepare_today_session(guild_id=GUILD_ID, now=utc_dt(12, 30, day=2))
     await create_member(member_repository, "2003", "C")
 
     future = await attendance_service.correct_attendance(
@@ -386,7 +323,7 @@ async def test_correction_rejects_future_and_non_session_member(
         new_status="PRESENT",
         reason="미래",
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(2, 13, 0),
+        now=utc_dt(13, 0, day=2),
     )
     not_member = await attendance_service.correct_attendance(
         guild_id=GUILD_ID,
@@ -395,7 +332,7 @@ async def test_correction_rejects_future_and_non_session_member(
         new_status="PRESENT",
         reason="테스트",
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(2, 13, 0),
+        now=utc_dt(13, 0, day=2),
     )
 
     assert future.status is AttendanceCorrectionStatus.FUTURE_DATE

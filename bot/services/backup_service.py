@@ -1,15 +1,13 @@
 """SQLite 백업 생성과 보관 정책을 관리하는 서비스."""
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-import shutil
 
 import aiosqlite
 
 from bot.db.database import Database
-
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +46,7 @@ class BackupService:
     async def create_backup(self, *, now: datetime | None = None) -> BackupResult:
         """타임스탬프가 붙은 DB 백업을 만들고 오래된 백업을 정리한다."""
 
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be a timezone-aware datetime.")
 

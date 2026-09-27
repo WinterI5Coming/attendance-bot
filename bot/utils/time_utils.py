@@ -1,10 +1,9 @@
 """시간대와 출석 시간 범위 관련 유틸리티 함수."""
 
-from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
 import re
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
 
 HHMM_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 WEEKDAY_CODES = (
@@ -27,7 +26,7 @@ class SessionWindow:
         late_at: Time when late attendance begins, converted to UTC.
         close_at: Time when attendance closes, converted to UTC.
 
-    All fields are timezone-aware datetimes with ``timezone.utc``. The project
+    All fields are timezone-aware datetimes with ``UTC``. The project
     stores absolute times as UTC ISO 8601 strings, so callers can serialize
     these values with ``isoformat()`` before writing them to SQLite.
     """
@@ -127,9 +126,9 @@ def build_session_window(
     # 저장 시점에는 서버 로컬 시간이 아니라 UTC 절대 시각을 사용한다.
     # 이렇게 해야 시간대가 다른 서버도 하나의 기준으로 비교할 수 있다.
     return SessionWindow(
-        start_at=local_start.astimezone(timezone.utc),
-        late_at=local_late.astimezone(timezone.utc),
-        close_at=local_close.astimezone(timezone.utc),
+        start_at=local_start.astimezone(UTC),
+        late_at=local_late.astimezone(UTC),
+        close_at=local_close.astimezone(UTC),
     )
 
 
@@ -214,3 +213,59 @@ def format_local_hhmm(value: datetime | None, timezone_name: str) -> str | None:
         raise ValueError(f"Unknown timezone: {timezone_name!r}") from exc
 
     return value.astimezone(local_timezone).strftime("%H:%M")
+
+
+def require_aware(value: datetime, name: str = "now") -> None:
+    """datetime 값이 timezone-aware인지 검증한다.
+
+    Args:
+        value: 검증할 datetime.
+        name: 오류 메시지에 사용할 인자 이름.
+
+    Raises:
+        ValueError: ``value``가 naive이거나 UTC offset을 계산할 수 없는 경우.
+    """
+
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{name} must be a timezone-aware datetime.")
+
+
+def to_utc_iso(value: datetime) -> str:
+    """timezone-aware datetime을 저장용 UTC ISO 8601 문자열로 변환한다."""
+
+    require_aware(value, "value")
+    return value.astimezone(UTC).isoformat()
+
+
+def parse_iso_date(value: str) -> date | None:
+    """``YYYY-MM-DD`` 문자열을 date로 변환하고 형식이 틀리면 ``None``을 반환한다."""
+
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def local_hhmm_to_utc(
+    *,
+    attendance_date: date,
+    hhmm: str,
+    timezone_name: str,
+) -> datetime:
+    """서버 로컬 날짜와 ``HH:MM`` 시각을 UTC datetime으로 변환한다.
+
+    Raises:
+        ValueError: 시각 형식이 틀리거나 시간대를 찾을 수 없는 경우.
+    """
+
+    local_time = parse_hhmm(hhmm)
+    try:
+        local_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unknown timezone: {timezone_name!r}") from exc
+
+    return datetime.combine(
+        attendance_date,
+        local_time,
+        tzinfo=local_timezone,
+    ).astimezone(UTC)

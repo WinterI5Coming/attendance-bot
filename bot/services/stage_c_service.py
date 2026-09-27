@@ -1,15 +1,24 @@
 """Stage C 시즌, 업적, 칭호, 간부 인사 비즈니스 규칙."""
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from bot.policies.rank_policy import get_rank
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.stage_c_repository import StageCRepository
+from bot.utils.time_utils import (
+    to_utc_iso,
+)
+
+
+def _utc_now_text(now: datetime | None) -> str:
+    """timezone-aware datetime(없으면 현재 시각)을 UTC ISO 문자열로 변환한다."""
+
+    return to_utc_iso(now if now is not None else datetime.now(UTC))
 
 
 @dataclass(frozen=True)
@@ -98,7 +107,7 @@ class SeasonService:
         settings = await self.guild_repository.get_by_guild_id(guild_id_text)
         if settings is None:
             raise ValueError("Guild is not configured.")
-        now_text = self._now_text(now)
+        now_text = _utc_now_text(now)
         policy_snapshot = {
             "timezone": settings["timezone"],
             "attendance_days": settings["attendance_days"],
@@ -142,7 +151,7 @@ class SeasonService:
             season_id=season_id,
             from_statuses=("SCHEDULED",),
             to_status="ACTIVE",
-            now=self._now_text(now),
+            now=_utc_now_text(now),
         )
 
     async def close_season(
@@ -154,7 +163,7 @@ class SeasonService:
     ) -> bool:
         """시즌을 종료하고 통계 스냅샷을 확정한다."""
 
-        now_text = self._now_text(now)
+        now_text = _utc_now_text(now)
         updated = await self.repository.update_season_status(
             guild_id=str(guild_id),
             season_id=season_id,
@@ -186,7 +195,7 @@ class SeasonService:
             season_id=season_id,
             from_statuses=("SCHEDULED", "ACTIVE"),
             to_status="CANCELLED",
-            now=self._now_text(now),
+            now=_utc_now_text(now),
             cancellation_reason=reason,
         )
 
@@ -209,7 +218,7 @@ class SeasonService:
             season_id=season_id,
             stats=stats,
             finalized=finalized,
-            now=self._now_text(now),
+            now=_utc_now_text(now),
         )
         return len(stats)
 
@@ -311,17 +320,6 @@ class SeasonService:
             "officer_evaluation_score": officer_score,
         }
 
-    @staticmethod
-    def _now_text(now: datetime | None) -> str:
-        """timezone-aware datetime을 UTC ISO 문자열로 변환한다."""
-
-        if now is None:
-            now = datetime.now(timezone.utc)
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("now must be timezone-aware.")
-        return now.astimezone(timezone.utc).isoformat()
-
-
 class AchievementService:
     """업적 평가, 업적 조회, 칭호 조회와 장착을 담당한다."""
 
@@ -402,7 +400,7 @@ class AchievementService:
         await self.repository.upsert_default_achievements(
             guild_id=str(guild_id),
             definitions=self.DEFAULT_DEFINITIONS,
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
 
     async def evaluate_season(
@@ -416,7 +414,7 @@ class AchievementService:
         """시즌 통계를 기준으로 업적과 보상을 중복 없이 지급한다."""
 
         guild_id_text = str(guild_id)
-        now_text = SeasonService._now_text(now)
+        now_text = _utc_now_text(now)
         await self.ensure_defaults(guild_id=guild_id_text, now=now)
         await self.season_service.reconcile_season(
             guild_id=guild_id_text,
@@ -533,7 +531,7 @@ class AchievementService:
             guild_id=str(guild_id),
             achievement_code=achievement_code,
             role_id=str(role_id),
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
 
     async def list_role_mappings(
@@ -567,7 +565,7 @@ class AchievementService:
             guild_id=str(guild_id),
             member_id=int(member["id"]),
             title_name=title_name,
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
 
     async def unequip_title(
@@ -588,7 +586,7 @@ class AchievementService:
         await self.repository.unequip_title(
             guild_id=str(guild_id),
             member_id=int(member["id"]),
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
 
     def _is_earned(self, definition: dict[str, Any], row: dict[str, Any]) -> bool:
@@ -641,7 +639,7 @@ class OfficerReviewService:
 
         return await self.repository.get_officer_settings(
             guild_id=str(guild_id),
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
 
     async def update_settings(
@@ -674,7 +672,7 @@ class OfficerReviewService:
         return await self.repository.update_officer_settings(
             guild_id=str(guild_id),
             values=values,
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
 
     async def create_preview(
@@ -755,7 +753,7 @@ class OfficerReviewService:
             ),
             summary_json=json.dumps(summary, ensure_ascii=True),
             result_json=json.dumps(result_payload, ensure_ascii=True),
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
         return OfficerReviewResult(
             configured=True,
@@ -781,7 +779,7 @@ class OfficerReviewService:
             review_id=review_id,
             status=status,
             executed_by_discord_id=str(executed_by_discord_id),
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
 
     async def get_review(
@@ -825,7 +823,7 @@ class OfficerReviewService:
             status=status,
             reason=reason,
             error_message=error_message,
-            now=SeasonService._now_text(now),
+            now=_utc_now_text(now),
         )
 
     async def list_role_change_logs(

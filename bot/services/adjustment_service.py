@@ -1,22 +1,23 @@
 """Stage B 출석 조정 비즈니스 규칙을 담당한다."""
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import json
 from typing import Any
-
-import aiosqlite
 
 from bot.policies.score_policy import get_attendance_score
 from bot.repositories.adjustment_repository import AdjustmentRepository
-from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.attendance_repository import AttendanceRepository
+from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.excuse_repository import ExcuseRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
+from bot.utils.time_utils import (
+    require_aware,
+)
 
 
 class AdjustmentStatus(Enum):
@@ -97,7 +98,7 @@ class AdjustmentService:
     ) -> AdjustmentResult:
         """승인된 사유 신청을 바탕으로 지각 감면을 적용한다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return AdjustmentResult(status=AdjustmentStatus.PERMISSION_DENIED)
         cleaned_reason = reason.strip()
@@ -197,7 +198,7 @@ class AdjustmentService:
     ) -> AdjustmentResult:
         """승인된 사유 신청을 사용해 결석 면제를 적용한다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return AdjustmentResult(status=AdjustmentStatus.PERMISSION_DENIED)
         cleaned_reason = reason.strip()
@@ -405,7 +406,7 @@ class AdjustmentService:
     ) -> AdjustmentResult:
         """사용자와 날짜 기준으로 활성 조정을 찾아 취소한다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return AdjustmentResult(status=AdjustmentStatus.PERMISSION_DENIED)
         cleaned_reason = reason.strip()
@@ -556,8 +557,3 @@ class AdjustmentService:
         finally:
             await connection.close()
 
-    def _require_aware(self, now: datetime) -> None:
-        """timezone-aware datetime인지 검증한다."""
-
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("now must be a timezone-aware datetime.")

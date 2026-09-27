@@ -2,8 +2,6 @@
 
 from typing import Any
 
-import aiosqlite
-
 from bot.db.database import Database
 
 

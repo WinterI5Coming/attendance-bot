@@ -2,29 +2,27 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import asyncio
-from contextlib import closing
 import json
 import logging
 import os
-from pathlib import Path
 import platform
 import shutil
 import sqlite3
+from contextlib import closing
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from bot.db.database import Database
 from bot.manager.database_validation import (
     APPLICATION_VERSION,
-    SUPPORTED_SCHEMA_VERSION,
     DatabaseValidationService,
     calculate_sha256,
 )
 from bot.runtime.instance_lock import InstanceLock
 from bot.runtime.paths import ensure_runtime_directories
-
 
 logger = logging.getLogger(__name__)
 

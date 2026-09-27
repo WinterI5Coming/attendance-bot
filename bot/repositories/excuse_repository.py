@@ -7,10 +7,6 @@ import aiosqlite
 from bot.db.database import Database
 
 
-ACTIVE_EXCUSE_STATUSES = ("PENDING", "APPROVED", "AUTO_APPROVED")
-EFFECTIVE_EXCUSE_STATUSES = ("APPROVED", "AUTO_APPROVED")
-
-
 class ExcuseRepository:
     """``excuse_requests`` 행을 다루는 SQL을 실행한다."""
 

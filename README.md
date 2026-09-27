@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Discord.py](https://img.shields.io/badge/discord.py-slash%20commands-5865F2)
 ![SQLite](https://img.shields.io/badge/Database-SQLite-003B57)
-![Tests](https://img.shields.io/badge/tests-99%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-124%20passed-brightgreen)
 
 ## Table Of Contents
 
@@ -87,10 +87,16 @@ The bot is designed for communities that need repeatable attendance operations: 
 ## Architecture
 
 ```text
+main.py / manager_main.py   exe 진입점 (인스턴스 락, 로깅, 오류 안내)
+        |
+        v
+bot/app/*           클라이언트 조립: 컨테이너(DI), 이벤트, 시스템 명령
+        |
+        v
 Discord slash commands
         |
         v
-bot/cogs/*          사용자 입력 검증, 권한 확인, 응답 메시지 구성
+bot/cogs/*          사용자 입력 검증, 권한 확인(cogs/common.py), 응답 메시지 구성
         |
         v
 bot/services/*      비즈니스 규칙, 트랜잭션 흐름, 점수/통계 계산
@@ -106,13 +112,17 @@ bot/db/database.py  연결 관리, PRAGMA, SQL migration 적용
 
 | Path | Description |
 | --- | --- |
-| `bot/cogs/` | Discord slash command handlers |
+| `bot/app/` | Bot client, dependency container, lifecycle events, system commands |
+| `bot/cogs/` | Discord slash command handlers (`common.py` holds shared guards) |
 | `bot/services/` | Business rules and orchestration |
 | `bot/repositories/` | SQLite data access layer |
 | `bot/policies/` | Score and rank policies |
 | `bot/scheduler/` | Attendance and backup background loops |
+| `bot/ui/` | Embed factory, message theme, value formatters |
+| `bot/runtime/` | Paths, logging, instance lock, time provider |
+| `bot/manager/` | Backup/restore/reset tool (GUI + CLI) |
 | `bot/db/migrations/` | Versioned SQLite migrations |
-| `tests/` | Unit and integration tests |
+| `tests/` | Unit and integration tests (`helpers.py` holds shared test helpers) |
 
 ## Quick Start
 
@@ -143,9 +153,8 @@ Copy-Item .env.example .env
 `.env`에 다음 값을 입력합니다.
 
 ```env
-DISCORD_TOKEN=your_discord_bot_token
+DISCORD_BOT_TOKEN=your_discord_bot_token
 DEVELOPMENT_GUILD_ID=your_test_guild_id
-DB_PATH=data/attendance.db
 TIMEZONE=Asia/Seoul
 LOG_LEVEL=INFO
 DEFAULT_ATTENDANCE_DAYS=MON,TUE,WED,THU,FRI
@@ -164,7 +173,7 @@ ENABLE_SEASONS=false
 
 처음 실행하면 다음 작업이 자동으로 진행됩니다.
 
-1. SQLite DB 파일과 `data/` 디렉터리를 준비합니다.
+1. SQLite DB 파일(`data/attendance.db`, 실행 폴더 기준 고정)과 `data/` 디렉터리를 준비합니다.
 2. `bot/db/migrations/*.sql`을 버전 순서대로 적용합니다.
 3. Cog를 등록하고 `DEVELOPMENT_GUILD_ID` 서버에 slash command를 동기화합니다.
 4. 누락된 출석 마감 처리를 복구합니다.
@@ -174,9 +183,8 @@ ENABLE_SEASONS=false
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `DISCORD_TOKEN` | Yes | - | Discord Bot Token |
+| `DISCORD_BOT_TOKEN` | Yes | - | Discord Bot Token (`DISCORD_TOKEN` also accepted) |
 | `DEVELOPMENT_GUILD_ID` | Yes | - | Slash command sync target guild |
-| `DB_PATH` | No | `data/attendance.db` | SQLite database path |
 | `TIMEZONE` | No | `Asia/Seoul` | Default guild timezone |
 | `LOG_LEVEL` | No | `INFO` | Python logging level |
 | `DEFAULT_ATTENDANCE_DAYS` | No | `MON,TUE,WED,THU,FRI` | Default attendance weekdays |

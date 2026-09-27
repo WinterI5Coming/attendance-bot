@@ -1,7 +1,7 @@
 """Path helpers for local Python and PyInstaller execution."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 
 def get_app_directory() -> Path:

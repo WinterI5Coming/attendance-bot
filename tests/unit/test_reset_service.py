@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import closing
 import json
 import sqlite3
+from contextlib import closing
 
 from bot.db.database import Database
 from bot.manager.reset_service import DataResetService

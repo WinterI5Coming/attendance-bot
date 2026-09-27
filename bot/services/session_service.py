@@ -1,9 +1,9 @@
 """오늘 출석 세션 준비와 마감 비즈니스 규칙을 담당한다."""
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from enum import Enum
 import logging
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
 from typing import Any
 
 import aiosqlite
@@ -20,10 +20,10 @@ from bot.utils.time_utils import (
     build_session_window,
     get_server_today,
     get_weekday_code,
+    local_hhmm_to_utc,
     parse_attendance_days,
-    parse_hhmm,
+    to_utc_iso,
 )
-
 
 DEFAULT_VERIFICATION_END_TIME = "23:00"
 DEFAULT_REQUIRED_VOICE_MINUTES = 60
@@ -208,7 +208,7 @@ class SessionService:
             close_deadline=policy["close_time"],
             timezone_name=timezone_name,
         )
-        verification_end_at = self._build_policy_time(
+        verification_end_at = local_hhmm_to_utc(
             attendance_date=local_date,
             hhmm=policy["verification_end_time"],
             timezone_name=timezone_name,
@@ -341,26 +341,6 @@ class SessionService:
             "early_leave_penalty": DEFAULT_EARLY_LEAVE_PENALTY,
             "no_participation_penalty": DEFAULT_NO_PARTICIPATION_PENALTY,
         }
-
-    def _build_policy_time(
-        self,
-        *,
-        attendance_date,
-        hhmm: str,
-        timezone_name: str,
-    ) -> datetime:
-        """서버 로컬 정책 시각으로 UTC 타임스탬프 하나를 만든다."""
-
-        from datetime import datetime as datetime_type
-        from zoneinfo import ZoneInfo
-
-        local_time = parse_hhmm(hhmm)
-        local_dt = datetime_type.combine(
-            attendance_date,
-            local_time,
-            tzinfo=ZoneInfo(timezone_name),
-        )
-        return local_dt.astimezone(timezone.utc)
 
     async def close_session(
         self,
@@ -502,6 +482,32 @@ class SessionService:
             raise
         finally:
             await connection.close()
+
+    async def list_start_announcement_targets(self) -> list[dict[str, Any]]:
+        """시작 안내가 아직 전송되지 않은 열린 세션 목록을 반환한다."""
+
+        return await self.session_repository.list_start_announcement_targets()
+
+    async def list_close_announcement_targets(self) -> list[dict[str, Any]]:
+        """마감 안내가 아직 전송되지 않은 종료 세션 목록을 반환한다."""
+
+        return await self.session_repository.list_close_announcement_targets()
+
+    async def mark_start_announced(self, *, session_id: int, now: datetime) -> None:
+        """세션 시작 안내가 전송되었음을 기록한다."""
+
+        await self.session_repository.mark_start_announced(
+            session_id=session_id,
+            now=to_utc_iso(now),
+        )
+
+    async def mark_close_announced(self, *, session_id: int, now: datetime) -> None:
+        """세션 마감 안내가 전송되었음을 기록한다."""
+
+        await self.session_repository.mark_close_announced(
+            session_id=session_id,
+            now=to_utc_iso(now),
+        )
 
     async def process_overdue_sessions(
         self,

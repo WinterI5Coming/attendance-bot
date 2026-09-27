@@ -1,15 +1,15 @@
 """Discord 서버의 최초 설정 명령어를 제공한다."""
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import NOT_CONFIGURED_MESSAGE, require_server_admin
+from bot.runtime.time_provider import TimeProvider
 from bot.services.guild_service import GuildService
-from bot.utils.permissions import is_server_admin
-
+from bot.ui.embed_factory import EMBEDS
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +19,14 @@ class SetupCog(commands.Cog):
 
     def __init__(
         self,
+        *,
         guild_service: GuildService,
+        time_provider: TimeProvider | None = None,
     ) -> None:
-        """Cog에 서버 설정 Service를 주입한다."""
+        """Cog에 서버 설정 Service와 시각 공급자를 주입한다."""
 
         self.guild_service = guild_service
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(
         name="초기설정",
@@ -49,20 +52,8 @@ class SetupCog(commands.Cog):
     ) -> None:
         """현재 Discord 서버의 기본 근태 설정을 생성한다."""
 
-        if not is_server_admin(interaction):
-            await interaction.response.send_message(
-                "🚫 서버 소유자 또는 관리자만 초기설정을 할 수 있습니다.",
-                ephemeral=True,
-            )
-            return
-
-        guild = interaction.guild
-
+        guild = await require_server_admin(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
             return
 
         if officer_role.is_default():
@@ -101,12 +92,9 @@ class SetupCog(commands.Cog):
             )
             return
 
-        embed = discord.Embed(
-            title="🎉 근태관리봇 초기설정 완료",
-            description=(
-                "✅ 현재 서버의 기본 근태 설정을 저장했습니다."
-            ),
-            color=discord.Color.green(),
+        embed = EMBEDS.success(
+            "🎉 근태관리봇 초기설정 완료",
+            "✅ 현재 서버의 기본 근태 설정을 저장했습니다.",
         )
 
         embed.add_field(
@@ -180,19 +168,8 @@ class SetupCog(commands.Cog):
     ) -> None:
         """/출석시간설정 명령을 처리한다."""
 
-        if not is_server_admin(interaction):
-            await interaction.response.send_message(
-                "🚫 서버 소유자 또는 관리자만 출석 시간을 변경할 수 있습니다.",
-                ephemeral=True,
-            )
-            return
-
-        guild = interaction.guild
+        guild = await require_server_admin(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -203,7 +180,7 @@ class SetupCog(commands.Cog):
                 attendance_start=attendance_start,
                 late_deadline=late_deadline,
                 close_deadline=close_deadline,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception(
@@ -225,7 +202,7 @@ class SetupCog(commands.Cog):
         """출석 시간 변경 응답 메시지를 만든다."""
 
         if result.status == "NOT_CONFIGURED":
-            return "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
+            return NOT_CONFIGURED_MESSAGE
 
         if result.status == "INVALID_TIME":
             return "⚠️ 시간은 HH:MM 형식으로 입력해주세요. 예: 21:30"

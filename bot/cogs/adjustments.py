@@ -1,20 +1,19 @@
 """Stage B 출석 조정 슬래시 명령어를 제공한다."""
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import has_officer_access
+from bot.runtime.time_provider import TimeProvider
 from bot.services.adjustment_service import (
     AdjustmentResult,
     AdjustmentService,
     AdjustmentStatus,
 )
 from bot.services.guild_service import GuildService
-from bot.utils.permissions import has_officer_permission
-
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +26,13 @@ class AdjustmentsCog(commands.Cog):
         *,
         adjustment_service: AdjustmentService,
         guild_service: GuildService,
+        time_provider: TimeProvider | None = None,
     ) -> None:
         """Cog 의존성을 초기화한다."""
 
         self.adjustment_service = adjustment_service
         self.guild_service = guild_service
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(name="지각감면", description="승인된 사유를 근거로 지각 시간을 감면합니다.")
     @app_commands.guild_only()
@@ -53,7 +54,7 @@ class AdjustmentsCog(commands.Cog):
     ) -> None:
         """/지각감면 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         try:
@@ -66,7 +67,7 @@ class AdjustmentsCog(commands.Cog):
                 reason=reason,
                 actor_discord_id=interaction.user.id,
                 has_permission=permission,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception("Late reduction failed: guild_id=%s", guild.id)
@@ -92,7 +93,7 @@ class AdjustmentsCog(commands.Cog):
     ) -> None:
         """/지각감면취소 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         result = await self.adjustment_service.cancel_late_reduction(
@@ -102,7 +103,7 @@ class AdjustmentsCog(commands.Cog):
             reason=reason,
             actor_discord_id=interaction.user.id,
             has_permission=permission,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._build_cancel_message(result, "지각 감면"),
@@ -121,7 +122,7 @@ class AdjustmentsCog(commands.Cog):
     ) -> None:
         """/결석면제 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         result = await self.adjustment_service.apply_absence_exemption(
@@ -131,7 +132,7 @@ class AdjustmentsCog(commands.Cog):
             reason=reason,
             actor_discord_id=interaction.user.id,
             has_permission=permission,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._build_absence_message(result, target_member.mention),
@@ -150,7 +151,7 @@ class AdjustmentsCog(commands.Cog):
     ) -> None:
         """/결석면제취소 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         result = await self.adjustment_service.cancel_absence_exemption(
@@ -160,23 +161,12 @@ class AdjustmentsCog(commands.Cog):
             reason=reason,
             actor_discord_id=interaction.user.id,
             has_permission=permission,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._build_cancel_message(result, "결석 면제"),
             ephemeral=True,
         )
-
-    async def _has_permission(self, interaction: discord.Interaction) -> bool:
-        """명령 실행자가 간부 권한을 갖고 있는지 확인한다."""
-
-        guild = interaction.guild
-        if guild is None:
-            return False
-        settings = await self.guild_service.get_settings(guild.id)
-        if settings is None:
-            return False
-        return has_officer_permission(interaction, settings["officer_role_id"])
 
     def _build_late_message(self, result: AdjustmentResult, mention: str) -> str:
         """지각 감면 처리 결과를 사용자 응답 문자열로 변환한다."""

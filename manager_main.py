@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
 import sys
 import tkinter as tk
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from tkinter import messagebox
 
 from bot.manager.cli import run_cli

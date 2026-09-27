@@ -1,9 +1,8 @@
 """출석 기록의 음성 채널 참여 검증을 담당한다."""
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
-import logging
 from typing import Any
 
 from bot.repositories.attendance_repository import AttendanceRepository
@@ -12,8 +11,10 @@ from bot.repositories.member_repository import MemberRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
 from bot.repositories.stage_a_repository import StageARepository
-from bot.utils.time_utils import get_server_today
-
+from bot.utils.time_utils import (
+    get_server_today,
+    require_aware,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,31 +24,6 @@ VERIFIABLE_ATTENDANCE_STATUSES = {
     "LATE",
     "EXCUSED_LATE",
 }
-
-
-class VerificationManageStatus(Enum):
-    """관리자 검증 작업에서 예상되는 처리 결과."""
-
-    UPDATED = "UPDATED"
-    NOT_CONFIGURED = "NOT_CONFIGURED"
-    NOT_FOUND = "NOT_FOUND"
-    INVALID_STATUS = "INVALID_STATUS"
-    PERMISSION_DENIED = "PERMISSION_DENIED"
-
-
-@dataclass(frozen=True)
-class VerificationSummary:
-    """표시용 정보가 보강된 검증 행 하나."""
-
-    verification_id: int
-    member_id: int
-    discord_id: str
-    display_name: str
-    attendance_status: str
-    status: str
-    required_seconds: int
-    accumulated_seconds: int
-    failure_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -165,7 +141,7 @@ class VoiceVerificationService:
             now: Current timezone-aware UTC time.
         """
 
-        self._require_aware(now)
+        require_aware(now)
         guild_id_text = str(guild_id)
         settings = await self.guild_repository.get_by_guild_id(guild_id_text)
         if settings is None or not settings.get("voice_verification_enabled"):
@@ -246,7 +222,7 @@ class VoiceVerificationService:
     ) -> VerificationFinalizeResult:
         """종료 시간이 지난 대기 검증을 마무리한다."""
 
-        self._require_aware(now)
+        require_aware(now)
         now_text = now.isoformat()
         connection = await self.stage_a_repository.database.connect()
         processed = verified = failed = penalties = 0
@@ -312,54 +288,6 @@ class VoiceVerificationService:
             failed=failed,
             penalties=penalties,
         )
-
-    async def list_session_verifications(
-        self,
-        *,
-        session_id: int,
-    ) -> list[VerificationSummary]:
-        """출석 세션 하나에 대한 검증 행을 반환한다."""
-
-        connection = await self.stage_a_repository.database.connect()
-        try:
-            cursor = await connection.execute(
-                """
-                SELECT
-                    av.id AS verification_id,
-                    av.member_id,
-                    m.discord_id,
-                    m.display_name,
-                    ar.status AS attendance_status,
-                    av.status,
-                    av.required_seconds,
-                    av.accumulated_seconds,
-                    av.failure_reason
-                FROM attendance_verifications AS av
-                JOIN members AS m ON m.id = av.member_id
-                JOIN attendance_records AS ar ON ar.id = av.attendance_record_id
-                WHERE av.session_id = ?
-                ORDER BY m.display_name COLLATE NOCASE;
-                """,
-                (session_id,),
-            )
-            rows = await cursor.fetchall()
-            await cursor.close()
-            return [
-                VerificationSummary(
-                    verification_id=int(row["verification_id"]),
-                    member_id=int(row["member_id"]),
-                    discord_id=row["discord_id"],
-                    display_name=row["display_name"],
-                    attendance_status=row["attendance_status"],
-                    status=row["status"],
-                    required_seconds=int(row["required_seconds"]),
-                    accumulated_seconds=int(row["accumulated_seconds"]),
-                    failure_reason=row["failure_reason"],
-                )
-                for row in rows
-            ]
-        finally:
-            await connection.close()
 
     def is_configured_voice_channel(
         self,
@@ -540,8 +468,3 @@ class VoiceVerificationService:
             if item.strip()
         }
 
-    def _require_aware(self, now: datetime) -> None:
-        """timezone-aware datetime인지 검증한다."""
-
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("now must be a timezone-aware datetime.")

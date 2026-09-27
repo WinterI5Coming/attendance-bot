@@ -1,12 +1,12 @@
 """출석 대상 대원의 등록, 제외, 조회 슬래시 명령어를 제공한다."""
 
 import logging
-from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import require_guild_settings, require_officer
 from bot.services.guild_service import GuildService
 from bot.services.member_service import (
     BotRegistrationError,
@@ -15,8 +15,7 @@ from bot.services.member_service import (
     MemberRegistrationOutcome,
     MemberService,
 )
-from bot.utils.permissions import has_officer_permission
-
+from bot.ui.embed_factory import EMBEDS
 
 logger = logging.getLogger(__name__)
 
@@ -33,41 +32,6 @@ class MembersCog(commands.Cog):
 
         self.guild_service = guild_service
         self.member_service = member_service
-
-    async def _get_guild_settings_or_notify(
-        self,
-        interaction: discord.Interaction,
-    ) -> dict[str, Any] | None:
-        """현재 서버의 초기설정을 조회하고, 없으면 안내 메시지를 보낸다.
-
-        Args:
-            interaction:
-                Discord 명령 실행 정보.
-
-        Returns:
-            초기설정이 있으면 설정 딕셔너리, 없으면 None.
-        """
-
-        guild = interaction.guild
-
-        if guild is None:
-            await interaction.response.send_message(
-                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
-            return None
-
-        settings = await self.guild_service.get_settings(guild.id)
-
-        if settings is None:
-            await interaction.response.send_message(
-                "⚙️ 아직 초기설정이 완료되지 않았습니다. "
-                "먼저 /초기설정을 실행해주세요.",
-                ephemeral=True,
-            )
-            return None
-
-        return settings
 
     @app_commands.command(
         name="대원등록",
@@ -87,24 +51,11 @@ class MembersCog(commands.Cog):
     ) -> None:
         """대상 사용자를 활성 대원으로 등록하거나 재활성화한다."""
 
-        settings = await self._get_guild_settings_or_notify(interaction)
-
-        if settings is None:
-            return
-
-        if not has_officer_permission(
-            interaction,
-            settings["officer_role_id"],
-        ):
-            await interaction.response.send_message(
-                "🚫 간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
-                ephemeral=True,
-            )
+        if await require_officer(interaction, self.guild_service) is None:
             return
 
         guild = interaction.guild
         actor = interaction.user
-
         assert guild is not None
 
         try:
@@ -173,24 +124,11 @@ class MembersCog(commands.Cog):
     ) -> None:
         """대상 사용자를 이후 출석 대상에서 제외한다."""
 
-        settings = await self._get_guild_settings_or_notify(interaction)
-
-        if settings is None:
-            return
-
-        if not has_officer_permission(
-            interaction,
-            settings["officer_role_id"],
-        ):
-            await interaction.response.send_message(
-                "🚫 간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
-                ephemeral=True,
-            )
+        if await require_officer(interaction, self.guild_service) is None:
             return
 
         guild = interaction.guild
         actor = interaction.user
-
         assert guild is not None
 
         try:
@@ -250,13 +188,10 @@ class MembersCog(commands.Cog):
     ) -> None:
         """현재 서버의 활성 대원 목록을 Embed로 보여준다."""
 
-        settings = await self._get_guild_settings_or_notify(interaction)
-
-        if settings is None:
+        if await require_guild_settings(interaction, self.guild_service) is None:
             return
 
         guild = interaction.guild
-
         assert guild is not None
 
         try:
@@ -286,14 +221,10 @@ class MembersCog(commands.Cog):
             for index, member in enumerate(members, start=1)
         ]
 
-        embed = discord.Embed(
+        embed = EMBEDS.build(
             title="👥 출석 대원 목록",
             description="\n".join(description_lines),
-            color=discord.Color.blurple(),
-        )
-
-        embed.set_footer(
-            text=f"✅ 활성 대원 {len(members)}명",
+            footer=f"✅ 활성 대원 {len(members)}명",
         )
 
         await interaction.response.send_message(

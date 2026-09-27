@@ -1,15 +1,14 @@
 """Application settings loaded from the runtime `.env` file."""
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, time
-import os
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
 from bot.runtime.paths import get_app_directory
-
 
 PROJECT_ROOT = get_app_directory()
 ENV_EXAMPLE = """DISCORD_BOT_TOKEN=

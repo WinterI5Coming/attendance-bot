@@ -2,14 +2,13 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 import aiosqlite
 
 from bot.repositories.member_repository import MemberRepository
-
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +110,7 @@ class MemberService:
 
         guild_id_text = str(guild_id)
         discord_id_text = str(discord_id)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         existing = await self.repository.get_by_discord_id(
             guild_id=guild_id_text,
@@ -252,7 +251,7 @@ class MemberService:
                 outcome=MemberDeactivationOutcome.ALREADY_INACTIVE,
             )
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         await self.repository.deactivate(
             guild_id=guild_id_text,

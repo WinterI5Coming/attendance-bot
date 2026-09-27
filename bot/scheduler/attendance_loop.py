@@ -1,7 +1,7 @@
 """분 단위로 출석 자동 처리를 수행하는 스케줄러."""
 
-from datetime import datetime
 import logging
+from datetime import datetime
 from typing import Any
 
 from discord.ext import tasks
@@ -11,7 +11,6 @@ from bot.services.guild_service import GuildService
 from bot.services.session_service import SessionService
 from bot.services.voice_verification_service import VoiceVerificationService
 from bot.utils.time_utils import format_local_hhmm
-
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +139,7 @@ class AttendanceScheduler:
             return
 
         sessions = (
-            await self.session_service.session_repository.list_start_announcement_targets()
+            await self.session_service.list_start_announcement_targets()
         )
         for session in sessions:
             channel_id = session["announcement_channel_id"] or session["attendance_channel_id"]
@@ -148,9 +147,9 @@ class AttendanceScheduler:
                 channel_id=channel_id,
                 content=self._build_start_message(session),
             ):
-                await self.session_service.session_repository.mark_start_announced(
+                await self.session_service.mark_start_announced(
                     session_id=int(session["id"]),
-                    now=now.isoformat(),
+                    now=now,
                 )
 
     async def _announce_closes(self, now: datetime) -> None:
@@ -160,7 +159,7 @@ class AttendanceScheduler:
             return
 
         sessions = (
-            await self.session_service.session_repository.list_close_announcement_targets()
+            await self.session_service.list_close_announcement_targets()
         )
         for session in sessions:
             channel_id = session["announcement_channel_id"] or session["attendance_channel_id"]
@@ -168,9 +167,9 @@ class AttendanceScheduler:
                 channel_id=channel_id,
                 content=self._build_close_message(session),
             ):
-                await self.session_service.session_repository.mark_close_announced(
+                await self.session_service.mark_close_announced(
                     session_id=int(session["id"]),
-                    now=now.isoformat(),
+                    now=now,
                 )
 
     async def _send_channel_message(self, *, channel_id: str | None, content: str) -> bool:

@@ -1,13 +1,12 @@
 """Discord 음성 상태 이벤트를 출석 검증 서비스로 전달한다."""
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord.ext import commands
 
+from bot.runtime.time_provider import TimeProvider
 from bot.services.voice_verification_service import VoiceVerificationService
-
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +18,12 @@ class VoiceTrackingCog(commands.Cog):
         self,
         *,
         voice_verification_service: VoiceVerificationService,
+        time_provider: TimeProvider | None = None,
     ) -> None:
         """Cog 의존성을 초기화한다."""
 
         self.voice_verification_service = voice_verification_service
+        self.time_provider = time_provider or TimeProvider()
 
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -57,7 +58,7 @@ class VoiceTrackingCog(commands.Cog):
                     if after_channel is None or after_channel.category is None
                     else after_channel.category.id
                 ),
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception(

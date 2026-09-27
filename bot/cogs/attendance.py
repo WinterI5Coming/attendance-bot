@@ -1,26 +1,25 @@
 """출석 체크인, 현황 조회, 관리자 정정 슬래시 명령어를 제공한다."""
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import NOT_CONFIGURED_MESSAGE, require_guild, require_officer
+from bot.runtime.time_provider import TimeProvider
 from bot.services.attendance_service import (
-    AttendanceCorrectionResult,
-    AttendanceCorrectionStatus,
     AttendanceCheckInResult,
     AttendanceCheckInStatus,
+    AttendanceCorrectionResult,
+    AttendanceCorrectionStatus,
     AttendanceService,
     AttendanceStatusMember,
     AttendanceStatusResult,
 )
 from bot.services.guild_service import GuildService
 from bot.services.session_service import SessionPrepareStatus
-from bot.utils.time_utils import format_local_hhmm
-from bot.utils.permissions import has_officer_permission
-
+from bot.ui.formatters import format_attendance_status, format_local_time
 
 logger = logging.getLogger(__name__)
 
@@ -30,19 +29,22 @@ class AttendanceCog(commands.Cog):
 
     def __init__(
         self,
+        *,
         attendance_service: AttendanceService,
-        guild_service: GuildService | None = None,
+        guild_service: GuildService,
+        time_provider: TimeProvider | None = None,
     ) -> None:
         """Cog 의존성을 초기화한다.
 
         Args:
-            attendance_service: Service that owns attendance business rules.
-            guild_service: Optional service used for administrator permission
-                checks in /출석수정.
+            attendance_service: 출석 비즈니스 규칙을 담당하는 서비스.
+            guild_service: /출석수정의 간부 권한 확인에 사용하는 서비스.
+            time_provider: 명령 처리 기준 시각을 공급하는 객체.
         """
 
         self.attendance_service = attendance_service
         self.guild_service = guild_service
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(
         name="출석",
@@ -55,13 +57,8 @@ class AttendanceCog(commands.Cog):
     ) -> None:
         """/출석 명령을 처리한다."""
 
-        guild = interaction.guild
-
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -70,7 +67,7 @@ class AttendanceCog(commands.Cog):
             result = await self.attendance_service.check_in(
                 guild_id=guild.id,
                 discord_id=interaction.user.id,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
                 current_voice_channel_id=self._current_voice_channel_id(
                     interaction.user
                 ),
@@ -103,19 +100,14 @@ class AttendanceCog(commands.Cog):
     ) -> None:
         """/출석현황 명령을 처리한다."""
 
-        guild = interaction.guild
-
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
             return
 
         try:
             result = await self.attendance_service.get_today_status(
                 guild_id=guild.id,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception(
@@ -167,36 +159,10 @@ class AttendanceCog(commands.Cog):
     ) -> None:
         """/출석수정 명령을 처리한다."""
 
+        if await require_officer(interaction, self.guild_service) is None:
+            return
         guild = interaction.guild
-
-        if guild is None:
-            await interaction.response.send_message(
-                "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
-            return
-
-        if self.guild_service is None:
-            await interaction.response.send_message(
-                "⚙️ 출석수정 기능이 아직 초기화되지 않았습니다.",
-                ephemeral=True,
-            )
-            return
-
-        settings = await self.guild_service.get_settings(guild.id)
-        if settings is None:
-            await interaction.response.send_message(
-                "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요.",
-                ephemeral=True,
-            )
-            return
-
-        if not has_officer_permission(interaction, settings["officer_role_id"]):
-            await interaction.response.send_message(
-                "🚫 간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
-                ephemeral=True,
-            )
-            return
+        assert guild is not None
 
         try:
             result = await self.attendance_service.correct_attendance(
@@ -206,7 +172,7 @@ class AttendanceCog(commands.Cog):
                 new_status=new_status.value,
                 reason=reason,
                 actor_discord_id=interaction.user.id,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception(
@@ -240,7 +206,7 @@ class AttendanceCog(commands.Cog):
         """
 
         if result.status is AttendanceCheckInStatus.PRESENT:
-            checked_at = self._format_time(result.checked_at, result.timezone_name)
+            checked_at = format_local_time(result.checked_at, result.timezone_name)
             return (
                 "✅ 출석 완료: 정상 출석\n"
                 f"{self._build_score_progress(result)}\n"
@@ -248,7 +214,7 @@ class AttendanceCog(commands.Cog):
             )
 
         if result.status is AttendanceCheckInStatus.LATE:
-            checked_at = self._format_time(result.checked_at, result.timezone_name)
+            checked_at = format_local_time(result.checked_at, result.timezone_name)
             return (
                 "⏰ 출석 완료: 지각\n"
                 f"{self._build_score_progress(result)}\n"
@@ -256,7 +222,7 @@ class AttendanceCog(commands.Cog):
             )
 
         if result.status is AttendanceCheckInStatus.EXCUSED_LATE:
-            checked_at = self._format_time(result.checked_at, result.timezone_name)
+            checked_at = format_local_time(result.checked_at, result.timezone_name)
             return (
                 "📋 출석 완료: 사유 지각\n"
                 f"{self._build_score_progress(result)}\n"
@@ -264,10 +230,10 @@ class AttendanceCog(commands.Cog):
             )
 
         if result.status is AttendanceCheckInStatus.ALREADY_CHECKED:
-            checked_at = self._format_time(result.checked_at, result.timezone_name)
+            checked_at = format_local_time(result.checked_at, result.timezone_name)
             return (
                 "ℹ️ 이미 오늘 출석 처리가 완료되었습니다.\n"
-                f"📌 상태: {self._attendance_status_label(result.attendance_status)}\n"
+                f"📌 상태: {format_attendance_status(result.attendance_status)}\n"
                 f"🕒 처리 시각: {checked_at}\n"
                 f"💯 현재 총점: {result.total_score}점"
             )
@@ -275,15 +241,15 @@ class AttendanceCog(commands.Cog):
         if result.status is AttendanceCheckInStatus.NOT_OPEN:
             return (
                 "⏳ 출석 시작 전입니다.\n"
-                f"🕒 출석 시작: {self._format_time(result.start_at, result.timezone_name)}\n"
-                f"⏰ 정상 출석 마감: {self._format_time(result.late_at, result.timezone_name)}\n"
-                f"🔒 전체 마감: {self._format_time(result.close_at, result.timezone_name)}"
+                f"🕒 출석 시작: {format_local_time(result.start_at, result.timezone_name)}\n"
+                f"⏰ 정상 출석 마감: {format_local_time(result.late_at, result.timezone_name)}\n"
+                f"🔒 전체 마감: {format_local_time(result.close_at, result.timezone_name)}"
             )
 
         if result.status is AttendanceCheckInStatus.CLOSED:
             return (
                 "🔒 오늘 출석은 이미 마감되었습니다.\n"
-                f"🕒 마감 시각: {self._format_time(result.close_at, result.timezone_name)}"
+                f"🕒 마감 시각: {format_local_time(result.close_at, result.timezone_name)}"
             )
 
         if result.status is AttendanceCheckInStatus.NOT_REGISTERED:
@@ -312,7 +278,7 @@ class AttendanceCog(commands.Cog):
                 )
             return "🚫 오늘 출석 일정은 취소되었습니다."
 
-        return "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
+        return NOT_CONFIGURED_MESSAGE
 
     def _build_status_message(
         self,
@@ -328,7 +294,7 @@ class AttendanceCog(commands.Cog):
         """
 
         if result.status is SessionPrepareStatus.NOT_CONFIGURED:
-            return "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
+            return NOT_CONFIGURED_MESSAGE
 
         if result.status is SessionPrepareStatus.NOT_ATTENDANCE_DAY:
             return "📅 오늘은 출석 일정이 없는 날입니다."
@@ -398,32 +364,6 @@ class AttendanceCog(commands.Cog):
             lines.append(f"🏅 계급 변경: {result.previous_rank} → {result.current_rank}")
         return "\n".join(lines)
 
-    def _format_time(
-        self,
-        value: str | None,
-        timezone_name: str | None,
-    ) -> str:
-        """UTC ISO 8601 시각을 서버 로컬 HH:MM 형식으로 변환한다."""
-
-        if value is None or timezone_name is None:
-            return "-"
-
-        parsed = datetime.fromisoformat(value)
-        formatted = format_local_hhmm(parsed, timezone_name)
-        return "-" if formatted is None else formatted
-
-    def _attendance_status_label(self, status: str | None) -> str:
-        """저장된 출석 상태에 대응하는 한국어 라벨을 반환한다."""
-
-        labels = {
-            "PRESENT": "정상 출석",
-            "LATE": "지각",
-            "ABSENT": "결석",
-            "EXCUSED_LATE": "사유 지각",
-            "EXCUSED_ABSENT": "사유 결석",
-        }
-        return labels.get(status, status or "-")
-
     def _current_voice_channel_id(
         self,
         user: discord.abc.User,
@@ -449,8 +389,8 @@ class AttendanceCog(commands.Cog):
                 "✏️ 출석 기록을 수정했습니다.\n\n"
                 f"👤 대상: {target_mention}\n"
                 f"🗓️ 날짜: {result.attendance_date}\n"
-                f"📌 기존 상태: {self._attendance_status_label(result.previous_status)}\n"
-                f"📌 변경 상태: {self._attendance_status_label(result.new_status)}\n"
+                f"📌 기존 상태: {format_attendance_status(result.previous_status)}\n"
+                f"📌 변경 상태: {format_attendance_status(result.new_status)}\n"
                 f"🎯 점수 보정: {result.score_delta:+d}\n"
                 f"📝 정정 사유: {result.reason}"
             )
@@ -460,7 +400,7 @@ class AttendanceCog(commands.Cog):
                 "🆕 출석 기록을 생성했습니다.\n\n"
                 f"👤 대상: {target_mention}\n"
                 f"🗓️ 날짜: {result.attendance_date}\n"
-                f"📌 상태: {self._attendance_status_label(result.new_status)}\n"
+                f"📌 상태: {format_attendance_status(result.new_status)}\n"
                 f"🎯 점수 반영: {result.score_delta:+d}\n"
                 f"📝 정정 사유: {result.reason}"
             )

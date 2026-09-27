@@ -216,33 +216,6 @@ class AdjustmentRepository:
             ),
         )
 
-    async def get_by_id(
-        self,
-        *,
-        adjustment_id: int,
-        connection: aiosqlite.Connection | None = None,
-    ) -> dict[str, Any] | None:
-        """ID로 조정 행 하나를 조회한다."""
-
-        owns_connection = connection is None
-        if connection is None:
-            connection = await self.database.connect()
-        try:
-            cursor = await connection.execute(
-                """
-                SELECT *
-                FROM attendance_adjustments
-                WHERE id = ?;
-                """,
-                (adjustment_id,),
-            )
-            row = await cursor.fetchone()
-            await cursor.close()
-            return None if row is None else dict(row)
-        finally:
-            if owns_connection:
-                await connection.close()
-
     async def get_attendance_score_for_record(
         self,
         *,

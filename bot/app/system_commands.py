@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import discord
 
-from bot.bot_client import AttendanceBot
-from bot.utils.discord_messages import info_embed
+from bot.app.client import AttendanceBot
+from bot.ui.embed_factory import EMBEDS
 
 
 def register_system_commands(bot: AttendanceBot) -> None:
@@ -25,7 +25,7 @@ def register_system_commands(bot: AttendanceBot) -> None:
 
         latency_ms = round(bot.latency * 1000)
         await interaction.response.send_message(
-            embed=info_embed(
+            embed=EMBEDS.info(
                 title="봇 상태",
                 description="정상 작동 중입니다.",
                 fields=(("응답 속도", f"{latency_ms}ms", True),),

@@ -13,7 +13,6 @@ from bot.runtime.time_provider import TimeProvider
 from bot.scheduler.attendance_loop import AttendanceScheduler
 from bot.scheduler.backup_loop import BackupScheduler
 
-
 logger = logging.getLogger(__name__)
 
 

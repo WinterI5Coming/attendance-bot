@@ -1,6 +1,6 @@
 """Tests for attendance time parsing and timezone conversion."""
 
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 
 import pytest
 
@@ -37,9 +37,9 @@ def test_build_session_window_converts_asia_seoul_to_utc():
         timezone_name="Asia/Seoul",
     )
 
-    assert window.start_at == datetime(2026, 7, 2, 12, 30, tzinfo=timezone.utc)
-    assert window.late_at == datetime(2026, 7, 2, 12, 40, tzinfo=timezone.utc)
-    assert window.close_at == datetime(2026, 7, 2, 12, 45, tzinfo=timezone.utc)
+    assert window.start_at == datetime(2026, 7, 2, 12, 30, tzinfo=UTC)
+    assert window.late_at == datetime(2026, 7, 2, 12, 40, tzinfo=UTC)
+    assert window.close_at == datetime(2026, 7, 2, 12, 45, tzinfo=UTC)
 
 
 def test_build_session_window_rejects_invalid_timezone():

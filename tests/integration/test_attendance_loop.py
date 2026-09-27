@@ -1,8 +1,15 @@
 """Integration tests for the actual attendance check-in loop."""
 
-from datetime import datetime, timezone
 
 import pytest
+from tests.helpers import (
+    GUILD_ID,
+    configure_guild,
+    count_rows,
+    create_member,
+    list_sessions,
+    utc_dt,
+)
 
 from bot.repositories.attendance_repository import AttendanceRepository
 from bot.repositories.score_repository import ScoreRepository
@@ -12,49 +19,6 @@ from bot.services.attendance_service import (
     AttendanceService,
 )
 from bot.services.session_service import SessionPrepareStatus, SessionService
-
-
-GUILD_ID = "111"
-ADMIN_ID = "9001"
-
-
-def utc_dt(hour: int, minute: int, second: int = 0, day: int = 2) -> datetime:
-    return datetime(2026, 7, day, hour, minute, second, tzinfo=timezone.utc)
-
-
-async def configure_daily_2130(database):
-    connection = await database.connect()
-    try:
-        await connection.execute(
-            """
-            UPDATE guild_settings
-            SET
-                attendance_days = 'MON,TUE,WED,THU,FRI,SAT,SUN',
-                attendance_start = '21:30',
-                late_deadline = '21:40',
-                close_deadline = '21:45',
-                timezone = 'Asia/Seoul'
-            WHERE guild_id = ?;
-            """,
-            (GUILD_ID,),
-        )
-        await connection.commit()
-    finally:
-        await connection.close()
-
-
-async def create_member(
-    member_repository,
-    discord_id: str,
-    display_name: str,
-) -> int:
-    return await member_repository.create(
-        guild_id=GUILD_ID,
-        discord_id=discord_id,
-        display_name=display_name,
-        created_by_discord_id=ADMIN_ID,
-        now="2026-07-02T00:00:00+00:00",
-    )
 
 
 def build_services(database, guild_repository, member_repository):
@@ -82,37 +46,12 @@ def build_services(database, guild_repository, member_repository):
     )
 
 
-async def count_rows(database, table: str) -> int:
-    connection = await database.connect()
-    try:
-        cursor = await connection.execute(f"SELECT COUNT(*) AS count FROM {table};")
-        row = await cursor.fetchone()
-        await cursor.close()
-        return int(row["count"])
-    finally:
-        await connection.close()
-
-
-async def first_session_id(database) -> int:
-    connection = await database.connect()
-    try:
-        cursor = await connection.execute(
-            "SELECT id FROM attendance_sessions ORDER BY id LIMIT 1;"
-        )
-        row = await cursor.fetchone()
-        await cursor.close()
-        assert row is not None
-        return int(row["id"])
-    finally:
-        await connection.close()
-
-
 async def test_prepare_today_session_creates_snapshot_once(
     database,
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     active_a = await create_member(member_repository, "2001", "A")
     active_b = await create_member(member_repository, "2002", "B")
     inactive = await create_member(member_repository, "2003", "C")
@@ -155,7 +94,7 @@ async def test_snapshot_excludes_late_registration_until_next_session(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
 
     session_repository, _, _, session_service, _ = build_services(
@@ -191,7 +130,7 @@ async def test_prepare_today_session_operational_statuses(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     _, _, _, session_service, _ = build_services(
         database,
         guild_repository,
@@ -220,7 +159,7 @@ async def test_prepare_today_session_operational_statuses(
     )
     assert not_day.status is SessionPrepareStatus.NOT_ATTENDANCE_DAY
 
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     already_closed = await session_service.prepare_today_session(
         guild_id=GUILD_ID,
@@ -234,7 +173,7 @@ async def test_scheduled_session_opens_after_start(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     _, _, _, session_service, _ = build_services(
         database,
@@ -261,7 +200,7 @@ async def test_present_check_in_creates_record_score_and_total(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     member_id = await create_member(member_repository, "2001", "A")
     _, attendance_repository, score_repository, _, attendance_service = build_services(
         database,
@@ -280,7 +219,7 @@ async def test_present_check_in_creates_record_score_and_total(
     assert result.total_score == 3
 
     record = await attendance_repository.get_by_session_and_member(
-        session_id=await first_session_id(database),
+        session_id=(await list_sessions(database))[0]["id"],
         member_id=member_id,
     )
     assert record is not None
@@ -316,7 +255,7 @@ async def test_late_check_in_creates_late_score(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     _, _, _, _, attendance_service = build_services(
         database,
@@ -353,7 +292,7 @@ async def test_check_in_boundaries(
     now,
     expected,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     _, _, _, _, attendance_service = build_services(
         database,
@@ -375,7 +314,7 @@ async def test_duplicate_check_in_does_not_duplicate_record_or_score(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     _, _, _, _, attendance_service = build_services(
         database,
@@ -406,7 +345,7 @@ async def test_check_in_rejects_not_registered_and_not_session_member(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     _, _, _, session_service, attendance_service = build_services(
         database,
@@ -440,7 +379,7 @@ async def test_cancelled_and_closed_sessions_are_rejected(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     _, _, _, session_service, attendance_service = build_services(
         database,
@@ -481,7 +420,7 @@ async def test_transaction_rolls_back_when_score_creation_fails(
     member_repository,
     monkeypatch,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     _, _, score_repository, _, attendance_service = build_services(
         database,
@@ -514,7 +453,7 @@ async def test_today_status_groups_present_late_and_unchecked(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_2130(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     await create_member(member_repository, "2002", "B")
     await create_member(member_repository, "2003", "C")

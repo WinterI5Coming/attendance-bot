@@ -1,13 +1,12 @@
 """SQLite 백업 서비스를 주기적으로 실행하는 스케줄러."""
 
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
 
 from discord.ext import tasks
 
 from bot.runtime.time_provider import TimeProvider
 from bot.services.backup_service import BackupService
-
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +55,7 @@ class BackupScheduler:
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be a timezone-aware datetime.")
 
-        date_key = now.astimezone(timezone.utc).date().isoformat()
+        date_key = now.astimezone(UTC).date().isoformat()
         if self._last_backup_date == date_key:
             return False
 

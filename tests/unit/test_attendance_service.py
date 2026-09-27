@@ -7,7 +7,6 @@ import pytest
 
 from bot.services.attendance_service import AttendanceTimeResult, classify_attendance
 
-
 SEOUL = ZoneInfo("Asia/Seoul")
 
 

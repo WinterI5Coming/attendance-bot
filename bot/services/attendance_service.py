@@ -1,19 +1,19 @@
 """출석 시간 판정과 체크인 비즈니스 규칙을 담당한다."""
 
+import json
+import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import json
-import logging
 from typing import Any
-import uuid
 
 import aiosqlite
 
 from bot.policies.rank_policy import get_rank
 from bot.policies.score_policy import get_attendance_score
-from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.attendance_repository import AttendanceRepository
+from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.excuse_repository import ExcuseRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
@@ -21,8 +21,11 @@ from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
 from bot.services.session_service import SessionPrepareStatus, SessionService
 from bot.services.streak_service import StreakService
-from bot.utils.time_utils import get_server_today
-
+from bot.utils.time_utils import (
+    get_server_today,
+    parse_iso_date,
+    require_aware,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,21 +49,6 @@ class AttendanceTimeResult(Enum):
     PRESENT = "PRESENT"
     LATE = "LATE"
     CLOSED = "CLOSED"
-
-
-def _require_aware_datetime(value: datetime, name: str) -> None:
-    """datetime 값에 사용할 수 있는 시간대 정보가 있는지 검증한다.
-
-    Args:
-        value: Datetime to validate.
-        name: Parameter name used in error messages.
-
-    Raises:
-        ValueError: If the value is naive or has an invalid timezone offset.
-    """
-
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{name} must be a timezone-aware datetime.")
 
 
 def classify_attendance(
@@ -89,10 +77,10 @@ def classify_attendance(
             satisfy start_at < late_at < close_at.
     """
 
-    _require_aware_datetime(now, "now")
-    _require_aware_datetime(start_at, "start_at")
-    _require_aware_datetime(late_at, "late_at")
-    _require_aware_datetime(close_at, "close_at")
+    require_aware(now, "now")
+    require_aware(start_at, "start_at")
+    require_aware(late_at, "late_at")
+    require_aware(close_at, "close_at")
 
     if not start_at < late_at < close_at:
         raise ValueError("Attendance window must satisfy start_at < late_at < close_at.")
@@ -318,7 +306,7 @@ class AttendanceService:
             aiosqlite.Error: For unexpected database failures.
         """
 
-        _require_aware_datetime(now, "now")
+        require_aware(now, "now")
 
         guild_id_text = str(guild_id)
         discord_id_text = str(discord_id)
@@ -454,7 +442,7 @@ class AttendanceService:
             aiosqlite.Error: For unexpected database failures.
         """
 
-        _require_aware_datetime(now, "now")
+        require_aware(now, "now")
 
         prepared = await self.session_service.prepare_today_session(
             guild_id=str(guild_id),
@@ -538,7 +526,7 @@ class AttendanceService:
             aiosqlite.Error: For unexpected database failures.
         """
 
-        _require_aware_datetime(now, "now")
+        require_aware(now, "now")
 
         if self.guild_repository is None or self.audit_repository is None:
             raise RuntimeError("Attendance correction dependencies are not configured.")
@@ -560,9 +548,8 @@ class AttendanceService:
                 reason=cleaned_reason,
             )
 
-        try:
-            parsed_date = datetime.strptime(attendance_date, "%Y-%m-%d").date()
-        except ValueError:
+        parsed_date = parse_iso_date(attendance_date)
+        if parsed_date is None:
             return AttendanceCorrectionResult(
                 status=AttendanceCorrectionStatus.INVALID_DATE,
                 attendance_date=attendance_date,

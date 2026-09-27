@@ -1,12 +1,13 @@
 """평가와 수동 점수 조정 슬래시 명령어를 제공한다."""
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import has_officer_access
+from bot.runtime.time_provider import TimeProvider
 from bot.services.evaluation_service import (
     EvaluationResult,
     EvaluationService,
@@ -15,8 +16,6 @@ from bot.services.evaluation_service import (
     ManualScoreStatus,
 )
 from bot.services.guild_service import GuildService
-from bot.utils.permissions import has_officer_permission
-
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +28,13 @@ class EvaluationsCog(commands.Cog):
         *,
         evaluation_service: EvaluationService,
         guild_service: GuildService,
+        time_provider: TimeProvider | None = None,
     ) -> None:
         """Cog가 사용할 평가 서비스와 서버 설정 서비스를 저장한다."""
 
         self.evaluation_service = evaluation_service
         self.guild_service = guild_service
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(name="평가", description="대상자에게 평가 점수를 부여합니다.")
     @app_commands.guild_only()
@@ -47,7 +48,7 @@ class EvaluationsCog(commands.Cog):
     ) -> None:
         """/평가 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         try:
@@ -58,7 +59,7 @@ class EvaluationsCog(commands.Cog):
                 score=score,
                 reason=reason,
                 has_permission=permission,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception("Evaluation creation failed: guild_id=%s", guild.id)
@@ -84,7 +85,7 @@ class EvaluationsCog(commands.Cog):
     ) -> None:
         """/평가취소 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         try:
@@ -94,7 +95,7 @@ class EvaluationsCog(commands.Cog):
                 actor_discord_id=interaction.user.id,
                 cancellation_reason=reason,
                 has_permission=permission,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception("Evaluation cancellation failed: guild_id=%s", guild.id)
@@ -126,7 +127,7 @@ class EvaluationsCog(commands.Cog):
     ) -> None:
         """/점수조정 명령을 처리한다."""
 
-        permission = await self._has_permission(interaction)
+        permission = await has_officer_access(interaction, self.guild_service)
         guild = interaction.guild
         assert guild is not None
         try:
@@ -137,7 +138,7 @@ class EvaluationsCog(commands.Cog):
                 delta=delta,
                 reason=reason,
                 has_permission=permission,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
             )
         except Exception:
             logger.exception("Manual score adjustment failed: guild_id=%s", guild.id)
@@ -151,17 +152,6 @@ class EvaluationsCog(commands.Cog):
             self._manual_score_message(result, target_member.mention),
             ephemeral=True,
         )
-
-    async def _has_permission(self, interaction: discord.Interaction) -> bool:
-        """명령 실행자가 평가/점수 조정 권한을 갖고 있는지 확인한다."""
-
-        guild = interaction.guild
-        if guild is None:
-            return False
-        settings = await self.guild_service.get_settings(guild.id)
-        if settings is None:
-            return False
-        return has_officer_permission(interaction, settings["officer_role_id"])
 
     def _evaluation_message(self, result: EvaluationResult, target: str) -> str:
         """평가 생성 또는 취소 결과를 사용자 응답 문자열로 변환한다."""

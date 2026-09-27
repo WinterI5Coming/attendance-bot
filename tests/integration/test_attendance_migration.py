@@ -1,12 +1,11 @@
 """Integration tests for the attendance core migration."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import aiosqlite
 import pytest
 
 from bot.db.database import Database
-
 
 GUILD_ID = "migration-guild"
 OTHER_GUILD_ID = "other-guild"
@@ -416,4 +415,4 @@ def test_test_constants_use_timezone_aware_utc_strings():
     parsed = datetime.fromisoformat(NOW)
 
     assert parsed.tzinfo is not None
-    assert parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+    assert parsed.utcoffset() == UTC.utcoffset(parsed)

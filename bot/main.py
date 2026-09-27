@@ -1,6 +1,6 @@
 """개발 환경에서 Discord 출석 봇을 실행하는 진입점."""
 
-from bot.bot_factory import create_bot
+from bot.app.factory import create_bot
 from bot.config import Settings, load_settings
 
 

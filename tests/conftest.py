@@ -7,7 +7,6 @@ from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.services.member_service import MemberService
 
-
 # members.guild_id는 guild_settings.guild_id를 참조하므로,
 # 테스트에서 사용할 서버 ID에 대한 기본 설정 행을 미리 만들어야 한다.
 TEST_GUILD_IDS = ("111", "222")

@@ -1,6 +1,15 @@
 """Integration tests for Stage B attendance adjustments."""
 
-from datetime import datetime, timezone
+
+from tests.helpers import (
+    ADMIN_ID,
+    GUILD_ID,
+    configure_guild,
+    count_rows,
+    create_member,
+    fetch_all,
+    utc_dt,
+)
 
 from bot.repositories.adjustment_repository import AdjustmentRepository
 from bot.repositories.attendance_repository import AttendanceRepository
@@ -13,46 +22,6 @@ from bot.services.adjustment_service import AdjustmentService, AdjustmentStatus
 from bot.services.attendance_service import AttendanceService
 from bot.services.report_service import ReportService
 from bot.services.session_service import SessionService
-
-
-GUILD_ID = "111"
-ADMIN_ID = "9001"
-
-
-def utc_dt(hour: int, minute: int, second: int = 0) -> datetime:
-    return datetime(2026, 7, 2, hour, minute, second, tzinfo=timezone.utc)
-
-
-async def configure_daily(database) -> None:
-    connection = await database.connect()
-    try:
-        await connection.execute(
-            """
-            UPDATE guild_settings
-            SET
-                attendance_days = 'MON,TUE,WED,THU,FRI,SAT,SUN',
-                attendance_start = '21:30',
-                late_deadline = '21:40',
-                close_deadline = '22:30',
-                timezone = 'Asia/Seoul',
-                exempt_absence_counts_in_attendance_denominator = 0
-            WHERE guild_id = ?;
-            """,
-            (GUILD_ID,),
-        )
-        await connection.commit()
-    finally:
-        await connection.close()
-
-
-async def create_member(member_repository, discord_id: str, name: str) -> int:
-    return await member_repository.create(
-        guild_id=GUILD_ID,
-        discord_id=discord_id,
-        display_name=name,
-        created_by_discord_id=ADMIN_ID,
-        now="2026-07-02T00:00:00+00:00",
-    )
 
 
 async def create_approved_excuse(excuse_repository, member_id: int) -> dict:
@@ -118,42 +87,12 @@ def build_services(database, guild_repository, member_repository):
     )
 
 
-async def count_rows(database, table: str) -> int:
-    connection = await database.connect()
-    try:
-        row = (
-            await connection.execute_fetchall(
-                f"SELECT COUNT(*) AS count FROM {table};"
-            )
-        )[0]
-        return int(row["count"])
-    finally:
-        await connection.close()
-
-
-async def list_score_events(database):
-    connection = await database.connect()
-    try:
-        return [
-            dict(row)
-            for row in await connection.execute_fetchall(
-                """
-                SELECT event_type, delta, reference_type, reference_id, dedup_key, reversed_event_id
-                FROM score_events
-                ORDER BY id;
-                """
-            )
-        ]
-    finally:
-        await connection.close()
-
-
 async def test_full_late_reduction_applies_delta_and_cancel_reversal(
     database,
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database, close_deadline="22:30", exempt_absence_counts_in_attendance_denominator=0)
     member_id = await create_member(member_repository, "2001", "A")
     (
         _,
@@ -219,7 +158,7 @@ async def test_full_late_reduction_applies_delta_and_cancel_reversal(
     assert cancelled.reversal_delta == -2
     assert await score_repository.get_total_score(member_id=member_id) == 1
     assert await count_rows(database, "audit_logs") == 2
-    assert [event["event_type"] for event in await list_score_events(database)] == [
+    assert [event["event_type"] for event in await fetch_all(database, "SELECT event_type, delta, reference_type, reference_id, dedup_key, reversed_event_id FROM score_events ORDER BY id;")] == [
         "ATTENDANCE_LATE",
         "LATE_REDUCTION_ADJUSTMENT",
         "LATE_REDUCTION_REVERSAL",
@@ -231,7 +170,7 @@ async def test_partial_late_reduction_can_record_zero_delta_without_score_event(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database, close_deadline="22:30", exempt_absence_counts_in_attendance_denominator=0)
     member_id = await create_member(member_repository, "2001", "A")
     _, attendance_service, adjustment_service, _, excuse_repository, _ = build_services(
         database,
@@ -271,7 +210,7 @@ async def test_absence_exemption_excludes_denominator_and_cancel_restores(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database, close_deadline="22:30", exempt_absence_counts_in_attendance_denominator=0)
     member_id = await create_member(member_repository, "2001", "A")
     (
         session_service,
@@ -327,7 +266,7 @@ async def test_adjustments_require_permission_and_approved_excuse(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database, close_deadline="22:30", exempt_absence_counts_in_attendance_denominator=0)
     await create_member(member_repository, "2001", "A")
     _, attendance_service, adjustment_service, _, _, _ = build_services(
         database,

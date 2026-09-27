@@ -6,18 +6,18 @@
 획득한 업적과 칭호를 계속 조회하고 장착할 수 있다.
 """
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import require_guild, require_officer
+from bot.runtime.time_provider import TimeProvider
 from bot.services.guild_service import GuildService
 from bot.services.stage_c_service import AchievementService
-from bot.utils.discord_messages import error_embed, info_embed, success_embed, truncate
-from bot.utils.permissions import has_officer_permission
-
+from bot.ui.embed_factory import EMBEDS
+from bot.ui.formatters import truncate
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ class AchievementsCog(commands.Cog):
         guild_service: GuildService,
         achievement_service: AchievementService,
         enable_season_awards: bool = False,
+        time_provider: TimeProvider | None = None,
     ) -> None:
         """Cog 의존성을 저장한다.
 
@@ -43,6 +44,7 @@ class AchievementsCog(commands.Cog):
         self.guild_service = guild_service
         self.achievement_service = achievement_service
         self.enable_season_awards = enable_season_awards
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(name="업적안내", description="업적과 칭호 사용 방법을 안내합니다.")
     @app_commands.guild_only()
@@ -50,7 +52,7 @@ class AchievementsCog(commands.Cog):
         """일반 사용자와 운영자를 위한 업적/칭호 사용법을 안내한다."""
 
         await interaction.response.send_message(
-            embed=info_embed(
+            embed=EMBEDS.info(
                 title="업적과 칭호 안내",
                 description=(
                     "업적은 출석, 연속 참여, 음성 검증 같은 활동 조건을 달성하면 "
@@ -89,14 +91,14 @@ class AchievementsCog(commands.Cog):
     async def ensure_achievements(self, interaction: discord.Interaction) -> None:
         """서버에 기본 업적 정의를 idempotent하게 생성하거나 갱신한다."""
 
-        if not await self._ensure_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
         await self.achievement_service.ensure_defaults(
             guild_id=interaction.guild_id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
-            embed=success_embed(
+            embed=EMBEDS.success(
                 title="업적 초기화 완료",
                 description="기본 업적 정의를 준비했습니다.",
                 fields=(
@@ -119,11 +121,11 @@ class AchievementsCog(commands.Cog):
         반환한다. 이미 지급된 업적/칭호 데이터는 그대로 보존된다.
         """
 
-        if not await self._ensure_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
         if not self.enable_season_awards:
             await interaction.response.send_message(
-                embed=error_embed(
+                embed=EMBEDS.error(
                     title="업적 평가가 비활성화되어 있습니다",
                     description="현재 `ENABLE_SEASONS=false` 상태라 시즌 기반 신규 업적 평가는 실행하지 않습니다.",
                     fields=(
@@ -140,7 +142,7 @@ class AchievementsCog(commands.Cog):
             guild_id=interaction.guild_id,
             season_id=season_id,
             created_by_discord_id=interaction.user.id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         role_successes = 0
         role_failures = 0
@@ -166,7 +168,7 @@ class AchievementsCog(commands.Cog):
                     role_failures += 1
 
         await interaction.followup.send(
-            embed=success_embed(
+            embed=EMBEDS.success(
                 title="업적 평가 완료",
                 description="시즌 통계를 기준으로 신규 업적을 평가했습니다.",
                 fields=(
@@ -183,15 +185,14 @@ class AchievementsCog(commands.Cog):
     async def list_achievements(self, interaction: discord.Interaction) -> None:
         """서버에 등록된 활성 업적 정의를 조회한다."""
 
-        if interaction.guild_id is None:
-            await self._send_guild_only(interaction)
+        if await require_guild(interaction) is None:
             return
         definitions = await self.achievement_service.list_definitions(
             guild_id=interaction.guild_id,
         )
         if not definitions:
             await interaction.response.send_message(
-                embed=info_embed(
+                embed=EMBEDS.info(
                     title="등록된 업적이 없습니다",
                     description="운영자가 `/업적초기화`를 먼저 실행해야 합니다.",
                 ),
@@ -207,7 +208,7 @@ class AchievementsCog(commands.Cog):
                 f"  보상: `{definition['reward_score']:+d}점` / 칭호: `{title}`"
             )
         await interaction.response.send_message(
-            embed=info_embed(
+            embed=EMBEDS.info(
                 title="업적 목록",
                 description=truncate("\n".join(lines), 3500),
                 fields=(
@@ -227,17 +228,17 @@ class AchievementsCog(commands.Cog):
     ) -> None:
         """특정 업적 코드와 Discord 역할을 연결한다."""
 
-        if not await self._ensure_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
         mapped = await self.achievement_service.set_role_mapping(
             guild_id=interaction.guild_id,
             achievement_code=achievement_code,
             role_id=role.id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         if not mapped:
             await interaction.response.send_message(
-                embed=error_embed(
+                embed=EMBEDS.error(
                     title="업적 코드를 찾지 못했습니다",
                     description="`/업적목록`에서 정확한 업적 코드를 확인한 뒤 다시 시도하세요.",
                 ),
@@ -245,7 +246,7 @@ class AchievementsCog(commands.Cog):
             )
             return
         await interaction.response.send_message(
-            embed=success_embed(
+            embed=EMBEDS.success(
                 title="업적 역할 매핑 저장 완료",
                 description="업적을 새로 획득한 사용자에게 연결된 역할을 부여합니다.",
                 fields=(
@@ -261,15 +262,14 @@ class AchievementsCog(commands.Cog):
     async def list_achievement_roles(self, interaction: discord.Interaction) -> None:
         """서버의 업적-역할 매핑 목록을 조회한다."""
 
-        if interaction.guild_id is None:
-            await self._send_guild_only(interaction)
+        if await require_guild(interaction) is None:
             return
         mappings = await self.achievement_service.list_role_mappings(
             guild_id=interaction.guild_id,
         )
         if not mappings:
             await interaction.response.send_message(
-                embed=info_embed(
+                embed=EMBEDS.info(
                     title="업적 역할 매핑이 없습니다",
                     description="`/업적역할설정`으로 업적 코드와 Discord 역할을 연결할 수 있습니다.",
                 ),
@@ -281,7 +281,7 @@ class AchievementsCog(commands.Cog):
             for mapping in mappings[:20]
         ]
         await interaction.response.send_message(
-            embed=info_embed(
+            embed=EMBEDS.info(
                 title="업적 역할 매핑",
                 description=truncate("\n".join(lines), 3500),
             ),
@@ -293,8 +293,7 @@ class AchievementsCog(commands.Cog):
     async def my_achievements(self, interaction: discord.Interaction) -> None:
         """현재 사용자가 획득한 업적을 조회한다."""
 
-        if interaction.guild_id is None:
-            await self._send_guild_only(interaction)
+        if await require_guild(interaction) is None:
             return
         achievements = await self.achievement_service.list_member_achievements(
             guild_id=interaction.guild_id,
@@ -302,7 +301,7 @@ class AchievementsCog(commands.Cog):
         )
         if not achievements:
             await interaction.response.send_message(
-                embed=info_embed(
+                embed=EMBEDS.info(
                     title="획득한 업적이 없습니다",
                     description="출석과 활동을 이어가면 업적을 획득할 수 있습니다.",
                     fields=(("도움말", "`/업적안내`에서 업적과 칭호 사용법을 확인하세요.", False),),
@@ -315,7 +314,7 @@ class AchievementsCog(commands.Cog):
             for achievement in achievements[:20]
         ]
         await interaction.response.send_message(
-            embed=info_embed(
+            embed=EMBEDS.info(
                 title="내 업적",
                 description=truncate("\n".join(lines), 3500),
             ),
@@ -327,8 +326,7 @@ class AchievementsCog(commands.Cog):
     async def my_titles(self, interaction: discord.Interaction) -> None:
         """현재 사용자가 잠금 해제한 칭호 목록을 조회한다."""
 
-        if interaction.guild_id is None:
-            await self._send_guild_only(interaction)
+        if await require_guild(interaction) is None:
             return
         titles = await self.achievement_service.list_member_titles(
             guild_id=interaction.guild_id,
@@ -336,7 +334,7 @@ class AchievementsCog(commands.Cog):
         )
         if not titles:
             await interaction.response.send_message(
-                embed=info_embed(
+                embed=EMBEDS.info(
                     title="보유한 칭호가 없습니다",
                     description="업적을 달성하면 칭호가 잠금 해제됩니다.",
                 ),
@@ -348,7 +346,7 @@ class AchievementsCog(commands.Cog):
             marker = "장착 중" if title["is_equipped"] else "보유"
             lines.append(f"- **{title['title_name']}** (`{marker}`)")
         await interaction.response.send_message(
-            embed=info_embed(
+            embed=EMBEDS.info(
                 title="내 칭호",
                 description=truncate("\n".join(lines), 3500),
                 fields=(("장착 방법", "`/칭호장착`을 실행하고 보유 칭호를 선택하세요.", False),),
@@ -365,18 +363,17 @@ class AchievementsCog(commands.Cog):
     ) -> None:
         """사용자의 대표 칭호를 변경한다."""
 
-        if interaction.guild_id is None:
-            await self._send_guild_only(interaction)
+        if await require_guild(interaction) is None:
             return
         equipped = await self.achievement_service.equip_title(
             guild_id=interaction.guild_id,
             discord_id=interaction.user.id,
             title_name=title_name,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         if not equipped:
             await interaction.response.send_message(
-                embed=error_embed(
+                embed=EMBEDS.error(
                     title="칭호를 장착할 수 없습니다",
                     description="보유하지 않은 칭호이거나 사용할 수 없는 칭호입니다.",
                     fields=(("해결 방법", "`/내칭호`에서 보유 칭호 이름을 확인하세요.", False),),
@@ -385,7 +382,7 @@ class AchievementsCog(commands.Cog):
             )
             return
         await interaction.response.send_message(
-            embed=success_embed(
+            embed=EMBEDS.success(
                 title="칭호 장착 완료",
                 description="대표 칭호를 변경했습니다.",
                 fields=(("새 칭호", f"**{title_name}**", False),),
@@ -423,16 +420,15 @@ class AchievementsCog(commands.Cog):
     async def unequip_title(self, interaction: discord.Interaction) -> None:
         """현재 장착 중인 대표 칭호를 해제한다."""
 
-        if interaction.guild_id is None:
-            await self._send_guild_only(interaction)
+        if await require_guild(interaction) is None:
             return
         await self.achievement_service.unequip_title(
             guild_id=interaction.guild_id,
             discord_id=interaction.user.id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
-            embed=success_embed(
+            embed=EMBEDS.success(
                 title="칭호 해제 완료",
                 description="대표 칭호를 비워 두었습니다. 보유 칭호는 삭제되지 않습니다.",
             ),
@@ -448,8 +444,7 @@ class AchievementsCog(commands.Cog):
     ) -> None:
         """업적/칭호 중심의 간단한 사용자 프로필을 표시한다."""
 
-        if interaction.guild_id is None:
-            await self._send_guild_only(interaction)
+        if await require_guild(interaction) is None:
             return
         member = target_member or interaction.user
         achievements = await self.achievement_service.list_member_achievements(
@@ -469,7 +464,7 @@ class AchievementsCog(commands.Cog):
             for achievement in achievements[:5]
         ) or "최근 업적이 없습니다."
         await interaction.response.send_message(
-            embed=info_embed(
+            embed=EMBEDS.info(
                 title=f"{member.display_name} 프로필",
                 description="업적과 칭호 중심의 공개 요약입니다.",
                 fields=(
@@ -482,32 +477,3 @@ class AchievementsCog(commands.Cog):
             ephemeral=False,
         )
 
-    async def _ensure_officer(self, interaction: discord.Interaction) -> bool:
-        """명령 실행자가 간부 또는 서버 관리자인지 확인한다."""
-
-        if interaction.guild is None or interaction.guild_id is None:
-            await self._send_guild_only(interaction)
-            return False
-        settings = await self.guild_service.get_settings(interaction.guild_id)
-        officer_role_id = None if settings is None else settings["officer_role_id"]
-        if not has_officer_permission(interaction, officer_role_id):
-            await interaction.response.send_message(
-                embed=error_embed(
-                    title="권한이 필요합니다",
-                    description="이 명령은 간부 또는 서버 관리자만 사용할 수 있습니다.",
-                ),
-                ephemeral=True,
-            )
-            return False
-        return True
-
-    async def _send_guild_only(self, interaction: discord.Interaction) -> None:
-        """서버 전용 명령을 DM에서 실행했을 때 안내한다."""
-
-        await interaction.response.send_message(
-            embed=error_embed(
-                title="서버에서만 사용할 수 있습니다",
-                description="이 명령은 Discord 서버 안에서 실행해야 합니다.",
-            ),
-            ephemeral=True,
-        )

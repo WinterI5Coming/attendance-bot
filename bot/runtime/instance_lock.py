@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
-import sys
+from pathlib import Path
 from types import TracebackType
 from typing import Self
-
 
 if os.name == "nt":
     import msvcrt

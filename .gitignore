@@ -32,7 +32,4 @@ __pycache__/
 # Build outputs
 build/
 dist/
-release/*.exe
-release/data/
-release/backups/
-release/logs/
+release/

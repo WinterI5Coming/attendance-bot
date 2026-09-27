@@ -1,9 +1,8 @@
 """Discord 서버의 최초 설정 규칙을 담당한다."""
 
-from typing import Any
-
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 from bot.config import Settings
 from bot.repositories.guild_repository import GuildRepository
@@ -71,7 +70,7 @@ class GuildService:
         """
 
         created_at = datetime.now(
-            timezone.utc
+            UTC
         ).isoformat()
 
         created = await self.repository.create_settings(

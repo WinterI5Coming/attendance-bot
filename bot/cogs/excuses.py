@@ -1,19 +1,29 @@
 """Slash commands for excuse requests and approvals."""
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import (
+    has_officer_access,
+    require_guild,
+    require_guild_settings,
+    require_officer,
+)
+from bot.runtime.time_provider import TimeProvider
 from bot.services.excuse_policy import EXCUSE_TYPE_LABELS
 from bot.services.excuse_service import ExcuseResult, ExcuseService, ExcuseStatus
 from bot.services.guild_service import GuildService
-from bot.utils.permissions import has_officer_permission
-
+from bot.ui.formatters import format_excuse_status
 
 logger = logging.getLogger(__name__)
+
+EXCUSE_TYPE_CHOICES = [
+    app_commands.Choice(name=label, value=code)
+    for code, label in EXCUSE_TYPE_LABELS.items()
+]
 
 
 class ExcusesCog(commands.Cog):
@@ -24,9 +34,11 @@ class ExcusesCog(commands.Cog):
         *,
         excuse_service: ExcuseService,
         guild_service: GuildService,
+        time_provider: TimeProvider | None = None,
     ) -> None:
         self.excuse_service = excuse_service
         self.guild_service = guild_service
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(
         name="사유신청",
@@ -39,13 +51,7 @@ class ExcusesCog(commands.Cog):
         excuse_type="결석, 지각, 조퇴 중 하나",
         reason="2자 이상 500자 이하의 사유",
     )
-    @app_commands.choices(
-        excuse_type=[
-            app_commands.Choice(name="결석", value="ABSENCE"),
-            app_commands.Choice(name="지각", value="LATE"),
-            app_commands.Choice(name="조퇴", value="EARLY_LEAVE"),
-        ]
-    )
+    @app_commands.choices(excuse_type=EXCUSE_TYPE_CHOICES)
     async def create_excuse(
         self,
         interaction: discord.Interaction,
@@ -55,12 +61,8 @@ class ExcusesCog(commands.Cog):
     ) -> None:
         """Handle `/사유신청`."""
 
-        guild = interaction.guild
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
             return
 
         try:
@@ -70,7 +72,7 @@ class ExcusesCog(commands.Cog):
                 target_date=target_date,
                 expected_time=None,
                 reason=reason,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
                 excuse_type=excuse_type.value,
             )
         except Exception:
@@ -103,19 +105,15 @@ class ExcusesCog(commands.Cog):
     ) -> None:
         """Handle `/사유취소`."""
 
-        guild = interaction.guild
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
             return
 
         result = await self.excuse_service.cancel_request(
             guild_id=guild.id,
             discord_id=interaction.user.id,
             excuse_request_id=excuse_request_id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._message_for_status(result),
@@ -141,12 +139,8 @@ class ExcusesCog(commands.Cog):
     ) -> None:
         """Handle `/사유목록`."""
 
-        guild = interaction.guild
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
             return
 
         result = await self.excuse_service.list_requests(
@@ -154,7 +148,7 @@ class ExcusesCog(commands.Cog):
             discord_id=interaction.user.id,
             status=None if status is None else status.value,
             include_all=include_all,
-            can_view_all=await self._has_officer_permission(interaction),
+            can_view_all=await has_officer_access(interaction, self.guild_service),
         )
         await interaction.response.send_message(
             self._build_list_message(result),
@@ -171,14 +165,14 @@ class ExcusesCog(commands.Cog):
     ) -> None:
         """Handle `/사유승인`."""
 
-        if not await self._respond_if_not_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
         assert interaction.guild is not None
         result = await self.excuse_service.approve_request(
             guild_id=interaction.guild.id,
             excuse_request_id=excuse_request_id,
             actor_discord_id=interaction.user.id,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._message_for_status(result),
@@ -196,7 +190,7 @@ class ExcusesCog(commands.Cog):
     ) -> None:
         """Handle `/사유거절`."""
 
-        if not await self._respond_if_not_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
         assert interaction.guild is not None
         result = await self.excuse_service.reject_request(
@@ -204,7 +198,7 @@ class ExcusesCog(commands.Cog):
             excuse_request_id=excuse_request_id,
             actor_discord_id=interaction.user.id,
             rejection_reason=rejection_reason,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._message_for_status(result),
@@ -221,9 +215,9 @@ class ExcusesCog(commands.Cog):
     ) -> None:
         """Handle `/사유상세`."""
 
-        if not await self._respond_if_not_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
-        row = await self.excuse_service.excuse_repository.get_by_id(
+        row = await self.excuse_service.get_request(
             excuse_request_id=excuse_request_id
         )
         if row is None:
@@ -249,13 +243,7 @@ class ExcusesCog(commands.Cog):
         reason="사유",
         admin_note="관리자메모",
     )
-    @app_commands.choices(
-        excuse_type=[
-            app_commands.Choice(name="결석", value="ABSENCE"),
-            app_commands.Choice(name="지각", value="LATE"),
-            app_commands.Choice(name="조퇴", value="EARLY_LEAVE"),
-        ]
-    )
+    @app_commands.choices(excuse_type=EXCUSE_TYPE_CHOICES)
     async def create_override(
         self,
         interaction: discord.Interaction,
@@ -267,7 +255,7 @@ class ExcusesCog(commands.Cog):
     ) -> None:
         """Handle `/사유예외등록`."""
 
-        if not await self._respond_if_not_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
         assert interaction.guild is not None
         result = await self.excuse_service.create_admin_override(
@@ -278,7 +266,7 @@ class ExcusesCog(commands.Cog):
             excuse_type=excuse_type.value,
             reason=reason,
             admin_note=admin_note,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._message_for_status(result),
@@ -299,7 +287,7 @@ class ExcusesCog(commands.Cog):
     ) -> None:
         """Handle `/사유정책설정`."""
 
-        if not await self._respond_if_not_officer(interaction):
+        if await require_officer(interaction, self.guild_service) is None:
             return
         assert interaction.guild is not None
         result = await self.excuse_service.update_policy(
@@ -307,7 +295,7 @@ class ExcusesCog(commands.Cog):
             actor_discord_id=interaction.user.id,
             deadline_time=deadline_time,
             deadline_days_before=deadline_days_before,
-            now=datetime.now(timezone.utc),
+            now=self.time_provider.now_utc(),
         )
         await interaction.response.send_message(
             self._message_for_status(result),
@@ -319,14 +307,8 @@ class ExcusesCog(commands.Cog):
     async def view_policy(self, interaction: discord.Interaction) -> None:
         """Handle `/사유정책조회`."""
 
-        if interaction.guild is None:
-            return
-        settings = await self.guild_service.get_settings(interaction.guild.id)
+        settings = await require_guild_settings(interaction, self.guild_service)
         if settings is None:
-            await interaction.response.send_message(
-                "아직 초기설정이 완료되지 않았습니다.",
-                ephemeral=True,
-            )
             return
         await interaction.response.send_message(
             self._build_policy_message(settings),
@@ -338,48 +320,10 @@ class ExcusesCog(commands.Cog):
     async def announce_policy(self, interaction: discord.Interaction) -> None:
         """Handle `/사유정책공지`."""
 
-        if not await self._respond_if_not_officer(interaction):
-            return
-        assert interaction.guild is not None
-        settings = await self.guild_service.get_settings(interaction.guild.id)
+        settings = await require_officer(interaction, self.guild_service)
         if settings is None:
-            await interaction.response.send_message(
-                "아직 초기설정이 완료되지 않았습니다.",
-                ephemeral=True,
-            )
             return
         await interaction.response.send_message(self._build_policy_notice(settings))
-
-    async def _has_officer_permission(self, interaction: discord.Interaction) -> bool:
-        guild = interaction.guild
-        if guild is None:
-            return False
-        settings = await self.guild_service.get_settings(guild.id)
-        if settings is None:
-            return False
-        return has_officer_permission(interaction, settings["officer_role_id"])
-
-    async def _respond_if_not_officer(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "이 명령어는 Discord 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
-            return False
-        settings = await self.guild_service.get_settings(interaction.guild.id)
-        if settings is None:
-            await interaction.response.send_message(
-                "아직 초기설정이 완료되지 않았습니다.",
-                ephemeral=True,
-            )
-            return False
-        if not has_officer_permission(interaction, settings["officer_role_id"]):
-            await interaction.response.send_message(
-                "간부 또는 서버 관리자만 사용할 수 있는 명령어입니다.",
-                ephemeral=True,
-            )
-            return False
-        return True
 
     def _build_create_message(self, result: ExcuseResult) -> str:
         if result.request is None:
@@ -410,7 +354,7 @@ class ExcusesCog(commands.Cog):
             label = EXCUSE_TYPE_LABELS.get(row.get("excuse_type"), row.get("excuse_type"))
             lines.append(
                 f"#{row['id']} / {row['target_date']} / {label} / "
-                f"{self._status_label(row['status'])} / <@{row['discord_id']}>"
+                f"{format_excuse_status(row['status'])} / <@{row['discord_id']}>"
             )
         return "\n".join(lines)
 
@@ -420,7 +364,7 @@ class ExcusesCog(commands.Cog):
             f"사유 신청 상세 #{row['id']}\n"
             f"대상 날짜: {row['target_date']}\n"
             f"유형: {label}\n"
-            f"상태: {self._status_label(row['status'])}\n"
+            f"상태: {format_excuse_status(row['status'])}\n"
             f"신청 시각: {row['requested_at']}\n"
             f"마감 시각: {row.get('deadline_at')}\n"
             f"관리자 예외: {'예' if row.get('is_admin_override') else '아니오'}\n"
@@ -458,17 +402,6 @@ class ExcusesCog(commands.Cog):
             ExcuseStatus.POLICY_UPDATED: "사유 신청 정책을 변경했습니다.",
         }
         return messages.get(result.status, "요청을 처리했습니다.")
-
-    def _status_label(self, status: str) -> str:
-        labels = {
-            "PENDING": "대기",
-            "APPROVED": "승인",
-            "AUTO_APPROVED": "자동승인",
-            "REJECTED": "거절",
-            "CANCELLED": "취소",
-            "CANCELED": "취소",
-        }
-        return labels.get(status, status)
 
     def _build_policy_message(self, settings: dict) -> str:
         days = int(settings.get("excuse_deadline_days_before") or 1)

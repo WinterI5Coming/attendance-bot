@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 
 from bot.utils.time_utils import parse_hhmm
 
-
 EXCUSE_TYPE_LABELS = {
     "ABSENCE": "결석",
     "LATE": "지각",

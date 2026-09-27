@@ -4,7 +4,6 @@ from datetime import datetime
 
 from bot.utils.time_utils import format_local_hhmm
 
-
 ATTENDANCE_STATUS_LABELS = {
     "PRESENT": "정상 출석",
     "LATE": "지각",
@@ -18,6 +17,15 @@ VERIFICATION_STATUS_LABELS = {
     "VERIFIED": "검증 성공",
     "FAILED": "검증 실패",
     "WAIVED": "검증 면제",
+}
+
+EXCUSE_STATUS_LABELS = {
+    "PENDING": "대기",
+    "APPROVED": "승인",
+    "AUTO_APPROVED": "자동승인",
+    "REJECTED": "거절",
+    "CANCELLED": "취소",
+    "CANCELED": "취소",
 }
 
 ADJUSTMENT_STATUS_LABELS = {
@@ -62,6 +70,14 @@ def format_verification_status(status: str | None) -> str:
     if status is None:
         return "-"
     return VERIFICATION_STATUS_LABELS.get(status, status)
+
+
+def format_excuse_status(status: str | None) -> str:
+    """저장된 사유 신청 상태 코드를 한국어 라벨로 바꾼다."""
+
+    if status is None:
+        return "-"
+    return EXCUSE_STATUS_LABELS.get(status, status)
 
 
 def format_adjustment_status(status: str | None) -> str:

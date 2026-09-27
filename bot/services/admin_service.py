@@ -1,9 +1,9 @@
 """관리자 설정과 세션 제어 비즈니스 규칙을 담당한다."""
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import json
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from bot.config import ALLOWED_ATTENDANCE_DAYS, ALLOWED_EXCUSE_MODES
@@ -11,7 +11,11 @@ from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
-from bot.utils.time_utils import build_session_window, get_server_today, parse_hhmm
+from bot.utils.time_utils import (
+    get_server_today,
+    parse_hhmm,
+    require_aware,
+)
 
 
 class SettingsUpdateStatus(Enum):
@@ -94,7 +98,7 @@ class AdminService:
     ) -> SettingsUpdateResult:
         """서버 설정 한 항목을 검증, 갱신하고 감사 로그를 남긴다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return SettingsUpdateResult(status=SettingsUpdateStatus.PERMISSION_DENIED)
 
@@ -157,7 +161,7 @@ class AdminService:
     ) -> SessionControlResult:
         """오늘의 SCHEDULED 또는 OPEN 세션을 취소하고 출석 점수를 되돌린다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return SessionControlResult(status=SessionControlStatus.PERMISSION_DENIED)
         cleaned_reason = reason.strip()
@@ -250,7 +254,7 @@ class AdminService:
     ) -> SessionControlResult:
         """오늘의 CANCELLED 세션을 재개하고 취소된 점수를 복원한다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return SessionControlResult(status=SessionControlStatus.PERMISSION_DENIED)
 
@@ -439,8 +443,3 @@ class AdminService:
             after_value=cleaned_value,
         )
 
-    def _require_aware(self, now: datetime) -> None:
-        """timezone-aware datetime인지 검증한다."""
-
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("now must be a timezone-aware datetime.")

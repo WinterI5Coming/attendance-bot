@@ -12,7 +12,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.utils.discord_messages import BRAND_COLOR, build_embed, truncate
+from bot.ui.embed_factory import EMBEDS
+from bot.ui.formatters import truncate
 
 
 @dataclass(frozen=True)
@@ -401,13 +402,12 @@ class HelpCog(commands.Cog):
                 )
             )
 
-        return build_embed(
+        return EMBEDS.build(
             title="근태관리봇 도움말",
             description=(
                 "필요한 카테고리를 선택하면 명령어 사용 예시, 파라미터, 권한을 "
                 "한 번에 확인할 수 있습니다."
             ),
-            color=BRAND_COLOR,
             fields=fields,
             footer="Tip: 처음 운영자는 '시작하기'부터 확인하세요.",
         )
@@ -425,10 +425,9 @@ class HelpCog(commands.Cog):
             )
             fields.append((command.name, truncate(value), False))
 
-        return build_embed(
+        return EMBEDS.build(
             title=f"도움말: {category.title}",
             description=category.description,
-            color=BRAND_COLOR,
             fields=fields,
             footer="명령 입력창에서 / 를 누르면 Discord가 실제 파라미터 입력칸을 보여줍니다.",
         )

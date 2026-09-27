@@ -1,16 +1,16 @@
 """개인 출석 리포트 비즈니스 규칙을 담당한다."""
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from bot.policies.rank_policy import get_rank
+from bot.repositories.evaluation_repository import EvaluationRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.report_repository import ReportRepository
 from bot.repositories.score_repository import ScoreRepository
-from bot.repositories.evaluation_repository import EvaluationRepository
 from bot.services.streak_service import StreakService
 
 
@@ -349,13 +349,13 @@ class ReportService:
             monday -= timedelta(days=7)
         next_monday = monday + timedelta(days=7)
         start_at = datetime.combine(monday, time.min, tzinfo=local_timezone).astimezone(
-            timezone.utc
+            UTC
         )
         end_at = datetime.combine(
             next_monday,
             time.min,
             tzinfo=local_timezone,
-        ).astimezone(timezone.utc)
+        ).astimezone(UTC)
 
         summary = await self.report_repository.get_weekly_summary(
             guild_id=guild_id_text,

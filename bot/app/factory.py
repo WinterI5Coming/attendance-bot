@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from bot.bot_client import AttendanceBot
-from bot.commands.system_commands import register_system_commands
+from bot.app.client import AttendanceBot
+from bot.app.container import create_bot_container
+from bot.app.lifecycle_events import register_lifecycle_events
+from bot.app.system_commands import register_system_commands
 from bot.config import Settings
-from bot.container import create_bot_container
-from bot.event_handlers.lifecycle_events import register_lifecycle_events
 
 
 def create_bot(settings: Settings) -> AttendanceBot:

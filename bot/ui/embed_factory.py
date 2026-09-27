@@ -70,21 +70,6 @@ class EmbedFactory:
             fields=fields,
         )
 
-    def warning(
-        self,
-        title: str,
-        description: str,
-        fields: Iterable[tuple[str, str, bool]] | None = None,
-    ) -> discord.Embed:
-        """주의가 필요한 상태를 표현하는 Embed를 만든다."""
-
-        return self.build(
-            title=title,
-            description=description,
-            color=self.theme.warning,
-            fields=fields,
-        )
-
     def error(
         self,
         title: str,
@@ -99,21 +84,5 @@ class EmbedFactory:
             color=self.theme.error,
             fields=fields,
         )
-
-    def admin(
-        self,
-        title: str,
-        description: str,
-        fields: Iterable[tuple[str, str, bool]] | None = None,
-    ) -> discord.Embed:
-        """운영자 전용 결과를 표현하는 Embed를 만든다."""
-
-        return self.build(
-            title=title,
-            description=description,
-            color=self.theme.admin,
-            fields=fields,
-        )
-
 
 EMBEDS = EmbedFactory()

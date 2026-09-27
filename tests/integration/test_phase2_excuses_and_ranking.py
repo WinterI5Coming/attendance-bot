@@ -1,58 +1,27 @@
 """Integration tests for Phase 2 excuse, streak, and ranking flows."""
 
-from datetime import datetime, timezone
 
-from bot.repositories.audit_repository import AuditRepository
+from tests.helpers import (
+    ADMIN_ID,
+    GUILD_ID,
+    FakeGuildService,
+    configure_guild,
+    create_member,
+    utc_dt,
+)
+
 from bot.repositories.attendance_repository import AttendanceRepository
+from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.excuse_repository import ExcuseRepository
 from bot.repositories.report_repository import ReportRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
 from bot.scheduler.attendance_loop import AttendanceScheduler
 from bot.services.attendance_service import AttendanceCheckInStatus, AttendanceService
-from bot.services.excuse_service import ExcuseStatus, ExcuseService
+from bot.services.excuse_service import ExcuseService, ExcuseStatus
 from bot.services.report_service import ReportService
 from bot.services.session_service import SessionCloseStatus, SessionService
 from bot.services.streak_service import StreakService
-
-
-GUILD_ID = "111"
-ADMIN_ID = "9001"
-
-
-def utc_dt(day: int, hour: int, minute: int, second: int = 0) -> datetime:
-    return datetime(2026, 7, day, hour, minute, second, tzinfo=timezone.utc)
-
-
-async def configure_daily(database) -> None:
-    connection = await database.connect()
-    try:
-        await connection.execute(
-            """
-            UPDATE guild_settings
-            SET
-                attendance_days = 'MON,TUE,WED,THU,FRI,SAT,SUN',
-                attendance_start = '21:30',
-                late_deadline = '21:40',
-                close_deadline = '21:45',
-                timezone = 'Asia/Seoul'
-            WHERE guild_id = ?;
-            """,
-            (GUILD_ID,),
-        )
-        await connection.commit()
-    finally:
-        await connection.close()
-
-
-async def create_member(member_repository, discord_id: str, name: str) -> int:
-    return await member_repository.create(
-        guild_id=GUILD_ID,
-        discord_id=discord_id,
-        display_name=name,
-        created_by_discord_id=ADMIN_ID,
-        now="2026-07-01T00:00:00+00:00",
-    )
 
 
 def build_phase2_services(database, guild_repository, member_repository):
@@ -108,16 +77,6 @@ def build_phase2_services(database, guild_repository, member_repository):
     )
 
 
-class FakeGuildService:
-    """Scheduler test double that exposes configured guild settings."""
-
-    def __init__(self, guild_repository):
-        self.guild_repository = guild_repository
-
-    async def list_all_settings(self):
-        return await self.guild_repository.list_all_settings()
-
-
 class FakeChannel:
     """Tiny Discord channel test double."""
 
@@ -146,7 +105,7 @@ async def test_approved_excuse_turns_late_check_in_into_excused_late(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     member_id = await create_member(member_repository, "2001", "A")
     (
         session_repository,
@@ -164,18 +123,18 @@ async def test_approved_excuse_turns_late_check_in_into_excused_late(
         target_date="2026-07-02",
         expected_time="21:42",
         reason="업무 일정",
-        now=utc_dt(1, 13, 0),
+        now=utc_dt(13, 0, day=1),
     )
     approved = await excuse_service.approve_request(
         guild_id=GUILD_ID,
         excuse_request_id=created.request["id"],
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(1, 13, 5),
+        now=utc_dt(13, 5, day=1),
     )
     result = await attendance_service.check_in(
         guild_id=GUILD_ID,
         discord_id="2001",
-        now=utc_dt(2, 12, 40),
+        now=utc_dt(12, 40, day=2),
     )
 
     session = await session_repository.get_by_guild_and_date(
@@ -202,7 +161,7 @@ async def test_approved_excuse_turns_auto_absent_into_excused_absent(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     member_id = await create_member(member_repository, "2001", "A")
     (
         session_repository,
@@ -220,21 +179,21 @@ async def test_approved_excuse_turns_auto_absent_into_excused_absent(
         target_date="2026-07-02",
         expected_time=None,
         reason="외부 일정",
-        now=utc_dt(1, 13, 0),
+        now=utc_dt(13, 0, day=1),
     )
     await excuse_service.approve_request(
         guild_id=GUILD_ID,
         excuse_request_id=created.request["id"],
         actor_discord_id=ADMIN_ID,
-        now=utc_dt(1, 13, 5),
+        now=utc_dt(13, 5, day=1),
     )
     prepared = await session_service.prepare_today_session(
         guild_id=GUILD_ID,
-        now=utc_dt(2, 12, 30),
+        now=utc_dt(12, 30, day=2),
     )
     closed = await session_service.close_session(
         session_id=prepared.session["id"],
-        now=utc_dt(2, 12, 46),
+        now=utc_dt(12, 46, day=2),
     )
     record = await attendance_repository.get_by_session_and_member(
         session_id=prepared.session["id"],
@@ -252,7 +211,7 @@ async def test_streak_bonus_and_ranking_use_current_scores(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     member_a = await create_member(member_repository, "2001", "A")
     await create_member(member_repository, "2002", "B")
     (
@@ -269,7 +228,7 @@ async def test_streak_bonus_and_ranking_use_current_scores(
         result = await attendance_service.check_in(
             guild_id=GUILD_ID,
             discord_id="2001",
-            now=utc_dt(day, 12, 30),
+            now=utc_dt(12, 30, day=day),
         )
         sessions = await session_service.session_repository.get_by_guild_and_date(
             guild_id=GUILD_ID,
@@ -277,13 +236,13 @@ async def test_streak_bonus_and_ranking_use_current_scores(
         )
         await session_service.close_session(
             session_id=sessions["id"],
-            now=utc_dt(day, 12, 46),
+            now=utc_dt(12, 46, day=day),
         )
 
     await attendance_service.check_in(
         guild_id=GUILD_ID,
         discord_id="2002",
-        now=utc_dt(4, 12, 30),
+        now=utc_dt(12, 30, day=4),
     )
 
     report = await report_service.get_my_report(guild_id=GUILD_ID, discord_id="2001")
@@ -305,7 +264,7 @@ async def test_scheduler_sends_start_and_close_announcements_once(
     guild_repository,
     member_repository,
 ):
-    await configure_daily(database)
+    await configure_guild(database)
     await create_member(member_repository, "2001", "A")
     (
         session_repository,
@@ -323,9 +282,9 @@ async def test_scheduler_sends_start_and_close_announcements_once(
         bot=FakeBot(channel),
     )
 
-    await scheduler.run_once(utc_dt(2, 12, 30))
-    await scheduler.run_once(utc_dt(2, 12, 31))
-    await scheduler.run_once(utc_dt(2, 12, 46))
+    await scheduler.run_once(utc_dt(12, 30, day=2))
+    await scheduler.run_once(utc_dt(12, 31, day=2))
+    await scheduler.run_once(utc_dt(12, 46, day=2))
     session = await session_repository.get_by_guild_and_date(
         guild_id=GUILD_ID,
         attendance_date="2026-07-02",

@@ -1,17 +1,19 @@
 """간부 평가와 수동 점수 조정 비즈니스 규칙을 담당한다."""
 
+import json
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import json
-import uuid
 
 from bot.policies.rank_policy import get_rank
 from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.evaluation_repository import EvaluationRepository
 from bot.repositories.member_repository import MemberRepository
 from bot.repositories.score_repository import ScoreRepository
-
+from bot.utils.time_utils import (
+    require_aware,
+)
 
 EVALUATION_MIN_SCORE = -5
 EVALUATION_MAX_SCORE = 5
@@ -108,7 +110,7 @@ class EvaluationService:
     ) -> EvaluationResult:
         """간부 평가와 점수 이벤트를 원자적으로 생성한다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return EvaluationResult(status=EvaluationStatus.PERMISSION_DENIED)
         if score == 0 or score < EVALUATION_MIN_SCORE or score > EVALUATION_MAX_SCORE:
@@ -228,7 +230,7 @@ class EvaluationService:
     ) -> EvaluationResult:
         """ACTIVE 평가를 되돌림 점수 이벤트와 함께 취소한다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return EvaluationResult(status=EvaluationStatus.PERMISSION_DENIED)
 
@@ -353,7 +355,7 @@ class EvaluationService:
     ) -> ManualScoreResult:
         """수동 점수 조정 이벤트와 감사 로그를 생성한다."""
 
-        self._require_aware(now)
+        require_aware(now)
         if not has_permission:
             return ManualScoreResult(status=ManualScoreStatus.PERMISSION_DENIED)
         if delta == 0 or delta < MANUAL_MIN_SCORE or delta > MANUAL_MAX_SCORE:
@@ -447,8 +449,3 @@ class EvaluationService:
 
         return MIN_REASON_LENGTH <= len(reason) <= MAX_REASON_LENGTH
 
-    def _require_aware(self, now: datetime) -> None:
-        """timezone-aware datetime인지 검증한다."""
-
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("now must be a timezone-aware datetime.")

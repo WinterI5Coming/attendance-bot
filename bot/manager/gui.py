@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from bot.manager.database_service import DatabaseManagerService

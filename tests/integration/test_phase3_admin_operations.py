@@ -1,14 +1,21 @@
 """Integration tests for Phase 3 administrator operations."""
 
-from datetime import datetime, timezone
 
+from tests.helpers import (
+    ADMIN_ID,
+    GUILD_ID,
+    count_rows,
+    create_member,
+    utc_dt,
+)
+
+from bot.repositories.attendance_repository import AttendanceRepository
 from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.evaluation_repository import EvaluationRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
-from bot.repositories.attendance_repository import AttendanceRepository
-from bot.services.attendance_service import AttendanceService
 from bot.services.admin_service import AdminService, SettingsUpdateStatus
+from bot.services.attendance_service import AttendanceService
 from bot.services.backup_service import BackupService
 from bot.services.evaluation_service import (
     EvaluationService,
@@ -17,24 +24,6 @@ from bot.services.evaluation_service import (
 )
 from bot.services.session_service import SessionService
 from bot.services.streak_service import StreakService
-
-
-GUILD_ID = "111"
-ADMIN_ID = "9001"
-
-
-def utc_dt(day: int, hour: int, minute: int) -> datetime:
-    return datetime(2026, 7, day, hour, minute, tzinfo=timezone.utc)
-
-
-async def create_member(member_repository, discord_id: str, name: str) -> int:
-    return await member_repository.create(
-        guild_id=GUILD_ID,
-        discord_id=discord_id,
-        display_name=name,
-        created_by_discord_id=ADMIN_ID,
-        now="2026-07-01T00:00:00+00:00",
-    )
 
 
 def build_services(database, guild_repository, member_repository):
@@ -56,19 +45,6 @@ def build_services(database, guild_repository, member_repository):
     return score_repository, evaluation_service, admin_service
 
 
-async def count_rows(database, table: str) -> int:
-    connection = await database.connect()
-    try:
-        row = (
-            await connection.execute_fetchall(
-                f"SELECT COUNT(*) AS count FROM {table};"
-            )
-        )[0]
-        return int(row["count"])
-    finally:
-        await connection.close()
-
-
 async def test_evaluation_cancel_and_manual_adjustment_are_ledger_events(
     database,
     guild_repository,
@@ -88,7 +64,7 @@ async def test_evaluation_cancel_and_manual_adjustment_are_ledger_events(
         score=3,
         reason="good attendance",
         has_permission=True,
-        now=utc_dt(2, 1, 0),
+        now=utc_dt(1, 0, day=2),
     )
     cancelled = await evaluation_service.cancel_evaluation(
         guild_id=GUILD_ID,
@@ -96,7 +72,7 @@ async def test_evaluation_cancel_and_manual_adjustment_are_ledger_events(
         actor_discord_id=ADMIN_ID,
         cancellation_reason="duplicate review",
         has_permission=True,
-        now=utc_dt(2, 1, 5),
+        now=utc_dt(1, 5, day=2),
     )
     adjusted = await evaluation_service.adjust_score(
         guild_id=GUILD_ID,
@@ -105,7 +81,7 @@ async def test_evaluation_cancel_and_manual_adjustment_are_ledger_events(
         delta=-10,
         reason="manual operation correction",
         has_permission=True,
-        now=utc_dt(2, 1, 10),
+        now=utc_dt(1, 10, day=2),
     )
 
     assert created.status is EvaluationStatus.CREATED
@@ -144,7 +120,7 @@ async def test_evaluation_validation_rejects_self_zero_and_inactive_target(
         score=1,
         reason="test",
         has_permission=True,
-        now=utc_dt(2, 1, 0),
+        now=utc_dt(1, 0, day=2),
     )
     zero = await evaluation_service.create_evaluation(
         guild_id=GUILD_ID,
@@ -153,7 +129,7 @@ async def test_evaluation_validation_rejects_self_zero_and_inactive_target(
         score=0,
         reason="test",
         has_permission=True,
-        now=utc_dt(2, 1, 0),
+        now=utc_dt(1, 0, day=2),
     )
     denied = await evaluation_service.adjust_score(
         guild_id=GUILD_ID,
@@ -162,7 +138,7 @@ async def test_evaluation_validation_rejects_self_zero_and_inactive_target(
         delta=1,
         reason="test",
         has_permission=False,
-        now=utc_dt(2, 1, 0),
+        now=utc_dt(1, 0, day=2),
     )
 
     assert inactive.status is EvaluationStatus.TARGET_NOT_ACTIVE
@@ -179,7 +155,7 @@ async def test_setting_update_writes_audit_log(database, guild_repository, membe
         value="mon,wed,mon",
         actor_discord_id=ADMIN_ID,
         has_permission=True,
-        now=utc_dt(2, 1, 0),
+        now=utc_dt(1, 0, day=2),
     )
     settings = await guild_repository.get_by_guild_id(GUILD_ID)
 
@@ -242,20 +218,20 @@ async def test_today_session_cancel_and_resume_compensates_scores(
     await attendance_service.check_in(
         guild_id=GUILD_ID,
         discord_id="2001",
-        now=utc_dt(2, 10, 0),
+        now=utc_dt(10, 0, day=2),
     )
     cancelled = await admin_service.cancel_today_session(
         guild_id=GUILD_ID,
         reason="day off",
         actor_discord_id=ADMIN_ID,
         has_permission=True,
-        now=utc_dt(2, 10, 5),
+        now=utc_dt(10, 5, day=2),
     )
     resumed = await admin_service.resume_today_session(
         guild_id=GUILD_ID,
         actor_discord_id=ADMIN_ID,
         has_permission=True,
-        now=utc_dt(2, 10, 6),
+        now=utc_dt(10, 6, day=2),
     )
 
     assert await score_repository.get_total_score(member_id=member_id) == 3
@@ -271,9 +247,9 @@ async def test_backup_service_creates_integrity_checked_copy(database, tmp_path)
         retention_count=2,
     )
 
-    first = await backup_service.create_backup(now=utc_dt(2, 1, 0))
-    second = await backup_service.create_backup(now=utc_dt(3, 1, 0))
-    third = await backup_service.create_backup(now=utc_dt(4, 1, 0))
+    first = await backup_service.create_backup(now=utc_dt(1, 0, day=2))
+    second = await backup_service.create_backup(now=utc_dt(1, 0, day=3))
+    third = await backup_service.create_backup(now=utc_dt(1, 0, day=4))
 
     backups = sorted((tmp_path / "backups").glob("attendance-*.db"))
     assert first.created

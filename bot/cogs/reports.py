@@ -1,12 +1,13 @@
 """출석 리포트와 랭킹 관련 슬래시 명령어를 제공한다."""
 
-from datetime import datetime, timezone
 import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.common import require_guild
+from bot.runtime.time_provider import TimeProvider
 from bot.services.report_service import (
     PersonalReportResult,
     PublicReportResult,
@@ -14,8 +15,7 @@ from bot.services.report_service import (
     ReportService,
     WeeklyReportResult,
 )
-from bot.utils.time_utils import format_local_hhmm
-
+from bot.ui.formatters import format_local_time, truncate
 
 logger = logging.getLogger(__name__)
 
@@ -23,22 +23,24 @@ logger = logging.getLogger(__name__)
 class ReportsCog(commands.Cog):
     """개인, 공개, 랭킹, 주간 리포트 명령어를 제공한다."""
 
-    def __init__(self, report_service: ReportService) -> None:
-        """리포트 조회에 사용할 서비스를 저장한다."""
+    def __init__(
+        self,
+        *,
+        report_service: ReportService,
+        time_provider: TimeProvider | None = None,
+    ) -> None:
+        """리포트 조회에 사용할 서비스와 시각 공급자를 저장한다."""
 
         self.report_service = report_service
+        self.time_provider = time_provider or TimeProvider()
 
     @app_commands.command(name="내정보", description="내 출석 통계와 점수를 조회합니다.")
     @app_commands.guild_only()
     async def my_info(self, interaction: discord.Interaction) -> None:
         """/내정보 명령을 처리한다."""
 
-        guild = interaction.guild
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "서버에서만 사용할 수 있는 명령입니다.",
-                ephemeral=True,
-            )
             return
 
         try:
@@ -64,12 +66,8 @@ class ReportsCog(commands.Cog):
     async def ranking(self, interaction: discord.Interaction) -> None:
         """/랭킹 명령을 처리한다."""
 
-        guild = interaction.guild
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "서버에서만 사용할 수 있는 명령입니다.",
-                ephemeral=True,
-            )
             return
 
         try:
@@ -97,12 +95,8 @@ class ReportsCog(commands.Cog):
     ) -> None:
         """/리포트 명령을 처리한다."""
 
-        guild = interaction.guild
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "서버에서만 사용할 수 있는 명령입니다.",
-                ephemeral=True,
-            )
             return
 
         try:
@@ -133,18 +127,14 @@ class ReportsCog(commands.Cog):
     ) -> None:
         """/주간보고 명령을 처리한다."""
 
-        guild = interaction.guild
+        guild = await require_guild(interaction)
         if guild is None:
-            await interaction.response.send_message(
-                "서버에서만 사용할 수 있는 명령입니다.",
-                ephemeral=True,
-            )
             return
 
         try:
             result = await self.report_service.get_weekly_report(
                 guild_id=guild.id,
-                now=datetime.now(timezone.utc),
+                now=self.time_provider.now_utc(),
                 previous_week=previous_week,
             )
         except Exception:
@@ -168,8 +158,8 @@ class ReportsCog(commands.Cog):
 
         recent_lines = []
         for event in result.recent_events or []:
-            occurred_at = format_local_hhmm(
-                datetime.fromisoformat(event["created_at"]),
+            occurred_at = format_local_time(
+                event["created_at"],
                 result.timezone_name or "Asia/Seoul",
             )
             recent_lines.append(
@@ -271,9 +261,7 @@ class ReportsCog(commands.Cog):
 
         evaluation_lines = []
         for evaluation in (result.recent_evaluations or [])[:3]:
-            reason = evaluation["reason"]
-            if len(reason) > 100:
-                reason = reason[:100] + "..."
+            reason = truncate(evaluation["reason"], 100)
             evaluation_lines.append(
                 f"- #{evaluation['id']} {evaluation['score']:+d}점 {reason}"
             )

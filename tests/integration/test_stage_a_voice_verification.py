@@ -1,6 +1,13 @@
 """Integration tests for Stage A voice participation verification."""
 
-from datetime import datetime, timezone
+
+from tests.helpers import (
+    GUILD_ID,
+    configure_guild,
+    create_member,
+    fetch_all,
+    utc_dt,
+)
 
 from bot.repositories.attendance_repository import AttendanceRepository
 from bot.repositories.score_repository import ScoreRepository
@@ -9,48 +16,6 @@ from bot.repositories.stage_a_repository import StageARepository
 from bot.services.attendance_service import AttendanceService
 from bot.services.session_service import SessionService
 from bot.services.voice_verification_service import VoiceVerificationService
-
-
-GUILD_ID = "111"
-ADMIN_ID = "9001"
-
-
-def utc_dt(hour: int, minute: int, second: int = 0) -> datetime:
-    return datetime(2026, 7, 2, hour, minute, second, tzinfo=timezone.utc)
-
-
-async def configure_daily_voice(database, *, enabled: bool = True) -> None:
-    connection = await database.connect()
-    try:
-        await connection.execute(
-            """
-            UPDATE guild_settings
-            SET
-                attendance_days = 'MON,TUE,WED,THU,FRI,SAT,SUN',
-                attendance_start = '21:30',
-                late_deadline = '21:40',
-                close_deadline = '21:45',
-                timezone = 'Asia/Seoul',
-                voice_verification_enabled = ?,
-                voice_channel_ids = '777',
-                voice_category_ids = NULL
-            WHERE guild_id = ?;
-            """,
-            (1 if enabled else 0, GUILD_ID),
-        )
-        await connection.commit()
-    finally:
-        await connection.close()
-
-
-async def create_member(member_repository, discord_id: str, name: str) -> int:
-    return await member_repository.create(
-        guild_id=GUILD_ID,
-        discord_id=discord_id,
-        display_name=name,
-        created_by_discord_id=ADMIN_ID,
-        now="2026-07-02T00:00:00+00:00",
-    )
 
 
 def build_services(database, guild_repository, member_repository):
@@ -93,20 +58,12 @@ def build_services(database, guild_repository, member_repository):
     )
 
 
-async def fetch_all(database, sql: str):
-    connection = await database.connect()
-    try:
-        return [dict(row) for row in await connection.execute_fetchall(sql)]
-    finally:
-        await connection.close()
-
-
 async def test_voice_disabled_preserves_existing_check_in_behavior(
     database,
     guild_repository,
     member_repository,
 ):
-    await configure_daily_voice(database, enabled=False)
+    await configure_guild(database, voice_verification_enabled=0, voice_channel_ids="777", voice_category_ids=None)
     member_id = await create_member(member_repository, "2001", "A")
     _, _, score_repository, _, _, _, attendance_service = build_services(
         database,
@@ -133,7 +90,7 @@ async def test_voice_duration_can_verify_before_end_time(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_voice(database, enabled=True)
+    await configure_guild(database, voice_verification_enabled=1, voice_channel_ids="777", voice_category_ids=None)
     await create_member(member_repository, "2001", "A")
     _, _, _, _, _, voice_service, attendance_service = build_services(
         database,
@@ -179,7 +136,7 @@ async def test_finalize_no_voice_join_creates_single_penalty(
     guild_repository,
     member_repository,
 ):
-    await configure_daily_voice(database, enabled=True)
+    await configure_guild(database, voice_verification_enabled=1, voice_channel_ids="777", voice_category_ids=None)
     member_id = await create_member(member_repository, "2001", "A")
     _, _, score_repository, _, _, voice_service, attendance_service = build_services(
         database,

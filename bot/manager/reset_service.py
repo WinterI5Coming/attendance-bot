@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import closing
-from dataclasses import dataclass
-from datetime import datetime
 import json
 import logging
 import os
-from pathlib import Path
 import sqlite3
+from contextlib import closing
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from bot.manager.database_validation import APPLICATION_VERSION, calculate_sha256
-
 
 logger = logging.getLogger(__name__)
 

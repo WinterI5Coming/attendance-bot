@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from contextlib import closing
 import hashlib
 import json
-from pathlib import Path
 import sqlite3
+from contextlib import closing
+from dataclasses import dataclass
+from pathlib import Path
 
+from bot.db.database import MIGRATIONS_DIRECTORY
 
 APPLICATION_VERSION = "1.0.0"
 SQLITE_HEADER = b"SQLite format 3\x00"
@@ -28,7 +29,9 @@ MINIMUM_PROJECT_TABLES = {
     "guild_settings",
     "members",
 }
-SUPPORTED_SCHEMA_VERSION = 8
+SUPPORTED_SCHEMA_VERSION = max(
+    int(path.stem.split("_", maxsplit=1)[0]) for path in MIGRATIONS_DIRECTORY.glob("*.sql")
+)
 
 
 @dataclass(frozen=True)

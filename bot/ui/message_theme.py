@@ -13,7 +13,6 @@ class MessageTheme:
     info: discord.Color = discord.Color.from_rgb(52, 152, 219)
     warning: discord.Color = discord.Color.from_rgb(245, 166, 35)
     error: discord.Color = discord.Color.from_rgb(231, 76, 60)
-    admin: discord.Color = discord.Color.from_rgb(108, 92, 231)
     brand: discord.Color = discord.Color.from_rgb(64, 120, 255)
     footer: str = "Attendance Bot"
 

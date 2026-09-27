@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import closing
 import sqlite3
+from contextlib import closing
 
 import pytest
 

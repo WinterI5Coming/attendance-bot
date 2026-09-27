@@ -1,12 +1,10 @@
 """Integration tests for Stage C seasons, achievements, and officer reviews."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from bot.db.database import Database
-from bot.repositories.guild_repository import GuildRepository
-from bot.repositories.member_repository import MemberRepository
 from bot.repositories.stage_c_repository import StageCRepository
 from bot.services.stage_c_service import (
     AchievementService,
@@ -14,18 +12,13 @@ from bot.services.stage_c_service import (
     SeasonService,
 )
 
-
 GUILD_ID = "stage-c-guild"
-NOW = datetime(2026, 7, 2, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 2, 12, 0, tzinfo=UTC)
 NOW_TEXT = NOW.isoformat()
 
 
 @pytest.fixture
-async def services(tmp_path):
-    database = Database(tmp_path / "stage_c.db")
-    await database.initialize()
-    guild_repository = GuildRepository(database=database)
-    member_repository = MemberRepository(database=database)
+async def services(database, guild_repository, member_repository):
     stage_c_repository = StageCRepository(database=database)
     season_service = SeasonService(
         guild_repository=guild_repository,

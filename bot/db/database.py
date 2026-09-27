@@ -1,13 +1,12 @@
 """SQLite 연결과 SQL 마이그레이션을 관리하는 모듈."""
 
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
 
 from bot.runtime.paths import get_resource_directory
-
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +207,7 @@ class Database:
             )
 
             applied_at = datetime.now(
-                timezone.utc,
+                UTC,
             ).isoformat()
 
             # 파일명은 프로젝트 내부에서 관리하지만 SQL 문자열에

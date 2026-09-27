@@ -7,7 +7,6 @@ import aiosqlite
 from bot.policies.score_policy import STREAK_BONUS_3_DAYS, STREAK_BONUS_7_DAYS
 from bot.repositories.score_repository import ScoreRepository
 
-
 COUNTING_STATUSES = {"PRESENT", "LATE", "EXCUSED_LATE"}
 NEUTRAL_STATUSES = {"EXCUSED_ABSENT"}
 BONUSES = {
