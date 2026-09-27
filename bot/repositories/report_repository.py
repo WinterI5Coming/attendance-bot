@@ -32,42 +32,17 @@ class ReportRepository:
             cursor = await connection.execute(
                 """
                 SELECT
-                    SUM(CASE
-                        WHEN abs_adj.id IS NOT NULL
-                             AND gs.exempt_absence_counts_in_attendance_denominator = 0
-                            THEN 0
-                        ELSE 1
-                    END) AS total_sessions,
-                    SUM(CASE
-                        WHEN late_adj.resulting_status = 'PRESENT' THEN 1
-                        WHEN abs_adj.id IS NULL AND ar.status = 'PRESENT' THEN 1
-                        ELSE 0
-                    END) AS present,
-                    SUM(CASE
-                        WHEN late_adj.resulting_status = 'LATE' THEN 1
-                        WHEN late_adj.id IS NULL AND abs_adj.id IS NULL AND ar.status = 'LATE' THEN 1
-                        ELSE 0
-                    END) AS late,
-                    SUM(CASE WHEN abs_adj.id IS NULL AND ar.status = 'ABSENT' THEN 1 ELSE 0 END) AS absent,
-                    SUM(CASE
-                        WHEN late_adj.id IS NULL AND abs_adj.id IS NULL AND ar.status = 'EXCUSED_LATE' THEN 1
-                        ELSE 0
-                    END) AS excused_late,
-                    SUM(CASE WHEN abs_adj.id IS NULL AND ar.status = 'EXCUSED_ABSENT' THEN 1 ELSE 0 END) AS excused_absent
+                    COUNT(*) AS total_sessions,
+                    SUM(CASE WHEN ar.status = 'PRESENT' THEN 1 ELSE 0 END) AS present,
+                    SUM(CASE WHEN ar.status = 'LATE' THEN 1 ELSE 0 END) AS late,
+                    SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END) AS absent,
+                    SUM(CASE WHEN ar.status = 'EXCUSED_LATE' THEN 1 ELSE 0 END) AS excused_late,
+                    SUM(CASE WHEN ar.status = 'EXCUSED_ABSENT' THEN 1 ELSE 0 END) AS excused_absent
                 FROM attendance_session_members AS asm
                 JOIN attendance_sessions AS s ON s.id = asm.session_id
-                JOIN guild_settings AS gs ON gs.guild_id = s.guild_id
                 LEFT JOIN attendance_records AS ar
                     ON ar.session_id = asm.session_id
                     AND ar.member_id = asm.member_id
-                LEFT JOIN attendance_adjustments AS late_adj
-                    ON late_adj.attendance_record_id = ar.id
-                    AND late_adj.adjustment_type = 'LATE_REDUCTION'
-                    AND late_adj.status = 'ACTIVE'
-                LEFT JOIN attendance_adjustments AS abs_adj
-                    ON abs_adj.attendance_record_id = ar.id
-                    AND abs_adj.adjustment_type = 'ABSENCE_EXEMPTION'
-                    AND abs_adj.status = 'ACTIVE'
                 WHERE asm.member_id = ?
                   AND s.status != 'CANCELLED';
                 """,
@@ -101,42 +76,17 @@ class ReportRepository:
             cursor = await connection.execute(
                 """
                 SELECT
-                    SUM(CASE
-                        WHEN abs_adj.id IS NOT NULL
-                             AND gs.exempt_absence_counts_in_attendance_denominator = 0
-                            THEN 0
-                        ELSE 1
-                    END) AS total_targets,
-                    SUM(CASE
-                        WHEN late_adj.resulting_status = 'PRESENT' THEN 1
-                        WHEN abs_adj.id IS NULL AND ar.status = 'PRESENT' THEN 1
-                        ELSE 0
-                    END) AS present,
-                    SUM(CASE
-                        WHEN late_adj.resulting_status = 'LATE' THEN 1
-                        WHEN late_adj.id IS NULL AND abs_adj.id IS NULL AND ar.status = 'LATE' THEN 1
-                        ELSE 0
-                    END) AS late,
-                    SUM(CASE WHEN abs_adj.id IS NULL AND ar.status = 'ABSENT' THEN 1 ELSE 0 END) AS absent,
-                    SUM(CASE
-                        WHEN late_adj.id IS NULL AND abs_adj.id IS NULL AND ar.status = 'EXCUSED_LATE' THEN 1
-                        ELSE 0
-                    END) AS excused_late,
-                    SUM(CASE WHEN abs_adj.id IS NULL AND ar.status = 'EXCUSED_ABSENT' THEN 1 ELSE 0 END) AS excused_absent
+                    COUNT(*) AS total_targets,
+                    SUM(CASE WHEN ar.status = 'PRESENT' THEN 1 ELSE 0 END) AS present,
+                    SUM(CASE WHEN ar.status = 'LATE' THEN 1 ELSE 0 END) AS late,
+                    SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END) AS absent,
+                    SUM(CASE WHEN ar.status = 'EXCUSED_LATE' THEN 1 ELSE 0 END) AS excused_late,
+                    SUM(CASE WHEN ar.status = 'EXCUSED_ABSENT' THEN 1 ELSE 0 END) AS excused_absent
                 FROM attendance_session_members AS asm
                 JOIN attendance_sessions AS s ON s.id = asm.session_id
-                JOIN guild_settings AS gs ON gs.guild_id = s.guild_id
                 LEFT JOIN attendance_records AS ar
                     ON ar.session_id = asm.session_id
                     AND ar.member_id = asm.member_id
-                LEFT JOIN attendance_adjustments AS late_adj
-                    ON late_adj.attendance_record_id = ar.id
-                    AND late_adj.adjustment_type = 'LATE_REDUCTION'
-                    AND late_adj.status = 'ACTIVE'
-                LEFT JOIN attendance_adjustments AS abs_adj
-                    ON abs_adj.attendance_record_id = ar.id
-                    AND abs_adj.adjustment_type = 'ABSENCE_EXEMPTION'
-                    AND abs_adj.status = 'ACTIVE'
                 WHERE s.guild_id = ?
                   AND s.status != 'CANCELLED'
                   AND s.start_at >= ?
@@ -175,28 +125,12 @@ class ReportRepository:
                     m.id AS member_id,
                     m.discord_id,
                     m.display_name,
-                    SUM(CASE
-                        WHEN abs_adj.id IS NOT NULL
-                             AND gs.exempt_absence_counts_in_attendance_denominator = 0
-                            THEN 0
-                        ELSE 1
-                    END) AS total_sessions,
-                    SUM(CASE
-                        WHEN late_adj.resulting_status = 'PRESENT' THEN 1
-                        WHEN abs_adj.id IS NULL AND ar.status = 'PRESENT' THEN 1
-                        ELSE 0
-                    END) AS present,
-                    SUM(CASE
-                        WHEN late_adj.resulting_status = 'LATE' THEN 1
-                        WHEN late_adj.id IS NULL AND abs_adj.id IS NULL AND ar.status = 'LATE' THEN 1
-                        ELSE 0
-                    END) AS late,
-                    SUM(CASE WHEN abs_adj.id IS NULL AND ar.status = 'ABSENT' THEN 1 ELSE 0 END) AS absent,
-                    SUM(CASE
-                        WHEN late_adj.id IS NULL AND abs_adj.id IS NULL AND ar.status = 'EXCUSED_LATE' THEN 1
-                        ELSE 0
-                    END) AS excused_late,
-                    SUM(CASE WHEN abs_adj.id IS NULL AND ar.status = 'EXCUSED_ABSENT' THEN 1 ELSE 0 END) AS excused_absent,
+                    COUNT(*) AS total_sessions,
+                    SUM(CASE WHEN ar.status = 'PRESENT' THEN 1 ELSE 0 END) AS present,
+                    SUM(CASE WHEN ar.status = 'LATE' THEN 1 ELSE 0 END) AS late,
+                    SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END) AS absent,
+                    SUM(CASE WHEN ar.status = 'EXCUSED_LATE' THEN 1 ELSE 0 END) AS excused_late,
+                    SUM(CASE WHEN ar.status = 'EXCUSED_ABSENT' THEN 1 ELSE 0 END) AS excused_absent,
                     (
                         SELECT COALESCE(SUM(se.delta), 0)
                         FROM score_events AS se
@@ -207,18 +141,9 @@ class ReportRepository:
                 FROM members AS m
                 JOIN attendance_session_members AS asm ON asm.member_id = m.id
                 JOIN attendance_sessions AS s ON s.id = asm.session_id
-                JOIN guild_settings AS gs ON gs.guild_id = s.guild_id
                 LEFT JOIN attendance_records AS ar
                     ON ar.session_id = asm.session_id
                     AND ar.member_id = asm.member_id
-                LEFT JOIN attendance_adjustments AS late_adj
-                    ON late_adj.attendance_record_id = ar.id
-                    AND late_adj.adjustment_type = 'LATE_REDUCTION'
-                    AND late_adj.status = 'ACTIVE'
-                LEFT JOIN attendance_adjustments AS abs_adj
-                    ON abs_adj.attendance_record_id = ar.id
-                    AND abs_adj.adjustment_type = 'ABSENCE_EXEMPTION'
-                    AND abs_adj.status = 'ACTIVE'
                 WHERE m.guild_id = ?
                   AND s.status != 'CANCELLED'
                   AND s.start_at >= ?

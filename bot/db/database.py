@@ -6,13 +6,11 @@ from pathlib import Path
 
 import aiosqlite
 
-from bot.runtime.paths import get_resource_directory
+from bot.runtime.paths import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
-MIGRATIONS_DIRECTORY = (
-    get_resource_directory() / "bot" / "db" / "migrations"
-)
+MIGRATIONS_DIRECTORY = PROJECT_ROOT / "bot" / "db" / "migrations"
 
 
 class Database:

@@ -342,25 +342,13 @@ class SessionRepository:
                     m.discord_id,
                     m.display_name,
                     ar.id AS attendance_record_id,
-                    CASE
-                        WHEN abs_adj.id IS NOT NULL THEN 'EXCUSED_ABSENT'
-                        WHEN late_adj.resulting_status IS NOT NULL THEN late_adj.resulting_status
-                        ELSE ar.status
-                    END AS attendance_status,
+                    ar.status AS attendance_status,
                     ar.checked_at
                 FROM attendance_session_members AS asm
                 JOIN members AS m ON m.id = asm.member_id
                 LEFT JOIN attendance_records AS ar
                     ON ar.session_id = asm.session_id
                     AND ar.member_id = asm.member_id
-                LEFT JOIN attendance_adjustments AS late_adj
-                    ON late_adj.attendance_record_id = ar.id
-                    AND late_adj.adjustment_type = 'LATE_REDUCTION'
-                    AND late_adj.status = 'ACTIVE'
-                LEFT JOIN attendance_adjustments AS abs_adj
-                    ON abs_adj.attendance_record_id = ar.id
-                    AND abs_adj.adjustment_type = 'ABSENCE_EXEMPTION'
-                    AND abs_adj.status = 'ACTIVE'
                 WHERE asm.session_id = ?
                 ORDER BY m.display_name COLLATE NOCASE;
                 """,

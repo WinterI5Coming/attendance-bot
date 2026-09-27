@@ -64,8 +64,8 @@ class AttendanceBot(commands.Bot):
         """
         Discord 로그인 직후 필요한 애플리케이션 준비 작업을 수행한다.
 
-        데이터베이스 마이그레이션을 적용한 뒤 Cog를 등록하고 개발 서버에
-        슬래시 명령을 동기화한다. 이후 미처리 출석 세션을 복구하고
+        데이터베이스 마이그레이션을 적용한 뒤 Cog를 등록하고 슬래시 명령을
+        동기화한다. 이후 미처리 출석 세션을 복구하고
         백그라운드 스케줄러를 시작한다.
         """
 
@@ -75,14 +75,19 @@ class AttendanceBot(commands.Bot):
         for cog in self._configured_cogs:
             await self.add_cog(cog)
 
-        development_guild = discord.Object(id=self.settings.development_guild_id)
-        self.tree.copy_global_to(guild=development_guild)
-        synced_commands = await self.tree.sync(guild=development_guild)
-        logger.info(
-            "Synced %d slash commands to development guild %s.",
-            len(synced_commands),
-            self.settings.development_guild_id,
-        )
+        if self.settings.development_guild_id is not None:
+            # 개발 중에는 특정 서버에만 동기화해 명령이 즉시 반영되게 한다.
+            development_guild = discord.Object(id=self.settings.development_guild_id)
+            self.tree.copy_global_to(guild=development_guild)
+            synced_commands = await self.tree.sync(guild=development_guild)
+            logger.info(
+                "Synced %d slash commands to development guild %s.",
+                len(synced_commands),
+                self.settings.development_guild_id,
+            )
+        else:
+            synced_commands = await self.tree.sync()
+            logger.info("Synced %d global slash commands.", len(synced_commands))
 
         self.attendance_scheduler.bot = self
         await self.attendance_scheduler.recover_overdue_sessions(

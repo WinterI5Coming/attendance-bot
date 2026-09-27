@@ -1,4 +1,4 @@
-"""Application settings loaded from the runtime `.env` file."""
+"""환경 변수(또는 로컬 `.env`)에서 읽어 검증한 실행 설정."""
 
 import os
 from dataclasses import dataclass
@@ -11,23 +11,6 @@ from dotenv import load_dotenv
 from bot.runtime.paths import get_app_directory
 
 PROJECT_ROOT = get_app_directory()
-ENV_EXAMPLE = """DISCORD_BOT_TOKEN=
-DEVELOPMENT_GUILD_ID=
-
-TIMEZONE=Asia/Seoul
-LOG_LEVEL=INFO
-
-DEFAULT_ATTENDANCE_DAYS=MON,TUE,WED,THU,FRI,SAT,SUN
-DEFAULT_ATTENDANCE_START=21:30
-DEFAULT_LATE_DEADLINE=21:40
-DEFAULT_CLOSE_DEADLINE=21:45
-DEFAULT_EXCUSE_MODE=officer_approval
-EXCUSE_DEADLINE_TIME=23:00
-EXCUSE_DEADLINE_DAYS_BEFORE=1
-REQUIRE_EXCUSE_APPROVAL=true
-ALLOW_LATE_EXCUSE=false
-"""
-
 ALLOWED_ATTENDANCE_DAYS = {
     "MON",
     "TUE",
@@ -63,7 +46,7 @@ class Settings:
     """Validated settings required to run the Discord attendance bot."""
 
     discord_token: str
-    development_guild_id: int
+    development_guild_id: int | None
     db_path: Path
     timezone: str
     log_level: str
@@ -126,51 +109,33 @@ def _validate_attendance_days(value: str) -> str:
     return ",".join(dict.fromkeys(days))
 
 
-def ensure_env_example(app_directory: Path = PROJECT_ROOT) -> Path:
-    """Create `.env.example` in the app directory if it is missing."""
-
-    env_example_path = app_directory / ".env.example"
-    if not env_example_path.exists():
-        env_example_path.write_text(ENV_EXAMPLE, encoding="utf-8")
-    return env_example_path
-
 
 def load_settings(app_directory: Path = PROJECT_ROOT) -> Settings:
-    """Load and validate settings from the app directory `.env` file."""
+    """환경 변수와 선택적 `.env`에서 설정을 읽고 검증한다."""
 
+    # `.env`는 로컬 개발 편의용이다. 컨테이너/서버에서는 환경 변수만으로 실행한다.
     env_path = app_directory / ".env"
-    env_example_path = ensure_env_example(app_directory)
-    if not env_path.exists():
-        raise RuntimeError(
-            ".env file is missing. Copy "
-            f"{env_example_path} to .env and set "
-            "DISCORD_BOT_TOKEN=your_discord_bot_token."
-        )
-
-    load_dotenv(env_path, override=True)
+    if env_path.exists():
+        load_dotenv(env_path, override=False)
 
     discord_token = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("DISCORD_TOKEN")
-    guild_id_value = os.getenv("DEVELOPMENT_GUILD_ID")
-
-    missing_variables: list[str] = []
     if not discord_token:
-        missing_variables.append("DISCORD_BOT_TOKEN")
-    if not guild_id_value:
-        missing_variables.append("DEVELOPMENT_GUILD_ID")
-
-    if missing_variables:
         raise RuntimeError(
-            "Missing required environment variables: "
-            + ", ".join(missing_variables)
-            + ". Set DISCORD_BOT_TOKEN=your_discord_bot_token in .env."
+            "DISCORD_BOT_TOKEN is not set. Export it as an environment variable "
+            "or put it in .env."
         )
 
-    try:
-        development_guild_id = int(guild_id_value)
-    except ValueError as exc:
-        raise RuntimeError("DEVELOPMENT_GUILD_ID must be a number.") from exc
+    # 설정하면 해당 서버에만 즉시 동기화한다(개발용). 비우면 글로벌 동기화.
+    development_guild_id: int | None = None
+    guild_id_value = os.getenv("DEVELOPMENT_GUILD_ID", "").strip()
+    if guild_id_value:
+        try:
+            development_guild_id = int(guild_id_value)
+        except ValueError as exc:
+            raise RuntimeError("DEVELOPMENT_GUILD_ID must be a number.") from exc
 
-    db_path = app_directory / "data" / "attendance.db"
+    data_directory = Path(os.getenv("DATA_DIR") or app_directory / "data")
+    db_path = data_directory / "attendance.db"
 
     timezone_name = os.getenv("TIMEZONE", "Asia/Seoul")
     try:

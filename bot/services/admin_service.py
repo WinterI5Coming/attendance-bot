@@ -379,9 +379,6 @@ class AdminService:
             "voice_verification_enabled": "voice_verification_enabled",
             "voice_channel_ids": "voice_channel_ids",
             "voice_category_ids": "voice_category_ids",
-            "exempt_absence_counts_in_attendance_denominator": (
-                "exempt_absence_counts_in_attendance_denominator"
-            ),
         }
         if normalized_field not in aliases:
             return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_FIELD)
@@ -410,10 +407,7 @@ class AdminService:
         elif db_field == "excuse_mode":
             if cleaned_value not in ALLOWED_EXCUSE_MODES:
                 return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
-        elif db_field in {
-            "voice_verification_enabled",
-            "exempt_absence_counts_in_attendance_denominator",
-        }:
+        elif db_field == "voice_verification_enabled":
             normalized_bool = cleaned_value.lower()
             if normalized_bool in {"1", "true", "yes", "on"}:
                 cleaned_value = "1"

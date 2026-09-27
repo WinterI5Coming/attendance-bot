@@ -49,24 +49,12 @@ class StreakService:
             cursor = await connection.execute(
                 """
                 SELECT
-                    CASE
-                        WHEN abs_adj.id IS NOT NULL THEN 'EXEMPT_ABSENT'
-                        WHEN late_adj.resulting_status IS NOT NULL THEN late_adj.resulting_status
-                        ELSE ar.status
-                    END AS status
+                    ar.status AS status
                 FROM attendance_session_members AS asm
                 JOIN attendance_sessions AS s ON s.id = asm.session_id
                 LEFT JOIN attendance_records AS ar
                     ON ar.session_id = asm.session_id
                     AND ar.member_id = asm.member_id
-                LEFT JOIN attendance_adjustments AS late_adj
-                    ON late_adj.attendance_record_id = ar.id
-                    AND late_adj.adjustment_type = 'LATE_REDUCTION'
-                    AND late_adj.status = 'ACTIVE'
-                LEFT JOIN attendance_adjustments AS abs_adj
-                    ON abs_adj.attendance_record_id = ar.id
-                    AND abs_adj.adjustment_type = 'ABSENCE_EXEMPTION'
-                    AND abs_adj.status = 'ACTIVE'
                 WHERE s.guild_id = ?
                   AND asm.member_id = ?
                   AND s.status != 'CANCELLED'

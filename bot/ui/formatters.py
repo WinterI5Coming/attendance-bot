@@ -28,11 +28,6 @@ EXCUSE_STATUS_LABELS = {
     "CANCELED": "취소",
 }
 
-ADJUSTMENT_STATUS_LABELS = {
-    "ACTIVE": "활성",
-    "CANCELLED": "취소됨",
-}
-
 
 def truncate(value: str, limit: int = 1024) -> str:
     """Discord Embed field 제한에 맞게 긴 문자열을 잘라낸다."""
@@ -79,13 +74,6 @@ def format_excuse_status(status: str | None) -> str:
         return "-"
     return EXCUSE_STATUS_LABELS.get(status, status)
 
-
-def format_adjustment_status(status: str | None) -> str:
-    """저장된 감면/면제 상태 코드를 한국어 라벨로 바꾼다."""
-
-    if status is None:
-        return "-"
-    return ADJUSTMENT_STATUS_LABELS.get(status, status)
 
 
 def format_local_time(value: str | None, timezone_name: str | None) -> str:

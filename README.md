@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Discord.py](https://img.shields.io/badge/discord.py-slash%20commands-5865F2)
 ![SQLite](https://img.shields.io/badge/Database-SQLite-003B57)
-![Tests](https://img.shields.io/badge/tests-124%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-110%20passed-brightgreen)
 
 ## Table Of Contents
 
@@ -43,7 +43,6 @@ The bot is designed for communities that need repeatable attendance operations: 
 - 점수 장부: 출석 점수, 보정 점수, 평가 점수, 수동 조정, 취소 보정
 - 리포트: 내 정보, 공개 리포트, 랭킹, 주간 보고
 - Stage A: 음성 채널 체류 기반 출석 검증
-- Stage B: 지각 감면, 결석 면제, 통계 반영
 - 상세 도움말: Discord 안에서 `/도움말`로 명령 사용법 확인
 
 ## Command Guide
@@ -61,7 +60,7 @@ The bot is designed for communities that need repeatable attendance operations: 
 | `/대원` | `등록`, `제외` | Officer/admin · `목록` Everyone |
 | `/출석` | `체크인`(대원), `현황`(모두), `수정`, `오늘취소`, `오늘재개` | Officer/admin |
 | `/사유` | `신청`, `취소`, `목록`, `정책` | Member · `상세`, `승인`, `거절`, `예외등록`, `정책`(변경/공지) Officer/admin |
-| `/점수` | `평가`, `평가취소`, `조정`, `지각감면`, `지각감면취소`, `결석면제`, `결석면제취소` | Officer/admin |
+| `/점수` | `평가`, `평가취소`, `조정` | Officer/admin |
 | `/내정보 [사용자]` | 내 통계(비공개) 또는 지정 사용자의 공개 리포트 | Everyone |
 | `/랭킹`, `/주간보고` | 서버 랭킹, 주간 통계 | Everyone |
 | `/도움말`, `/핑` | 도움말, 상태 확인 | Everyone |
@@ -69,7 +68,7 @@ The bot is designed for communities that need repeatable attendance operations: 
 ## Architecture
 
 ```text
-main.py / manager_main.py   exe 진입점 (인스턴스 락, 로깅, 오류 안내)
+main.py             실행 진입점 (로깅 설정 후 봇 실행)
         |
         v
 bot/app/*           클라이언트 조립: 컨테이너(DI), 이벤트, 시스템 명령
@@ -101,62 +100,43 @@ bot/db/database.py  연결 관리, PRAGMA, SQL migration 적용
 | `bot/policies/` | Score and rank policies |
 | `bot/scheduler/` | Attendance and backup background loops |
 | `bot/ui/` | Embed factory, message theme, value formatters |
-| `bot/runtime/` | Paths, logging, instance lock, time provider |
-| `bot/manager/` | Backup/restore/reset tool (GUI + CLI) |
+| `bot/runtime/` | Paths, logging, time provider |
 | `bot/db/migrations/` | Versioned SQLite migrations |
 | `tests/` | Unit and integration tests (`helpers.py` holds shared test helpers) |
 
 ## Quick Start
 
-### 1. Requirements
+### Docker로 상시 운영 (권장)
 
-- Python 3.11 이상
-- Discord Application과 Bot Token
-- 테스트용 Discord 서버 ID
-
-### 2. Install
-
-```powershell
+```bash
 git clone <repository-url>
 cd attendance-bot
+cp .env.example .env        # DISCORD_BOT_TOKEN 입력
+docker compose up -d --build
+docker compose logs -f bot  # "Synced N global slash commands." 확인
+```
 
+- SQLite DB와 백업은 호스트의 `./data/`, 로그는 `./logs/`에 남습니다. 컨테이너를 지워도 데이터는 유지됩니다.
+- 재시작 정책이 `unless-stopped`라 서버 재부팅 시 자동으로 다시 뜹니다.
+- 업데이트: `git pull && docker compose up -d --build`
+
+### 로컬 개발 실행
+
+```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
-
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+Copy-Item .env.example .env   # DISCORD_BOT_TOKEN, DEVELOPMENT_GUILD_ID 입력
+python main.py
 ```
 
-### 3. Configure
-
-```powershell
-Copy-Item .env.example .env
-```
-
-`.env`에 다음 값을 입력합니다.
-
-```env
-DISCORD_BOT_TOKEN=your_discord_bot_token
-DEVELOPMENT_GUILD_ID=your_test_guild_id
-TIMEZONE=Asia/Seoul
-LOG_LEVEL=INFO
-DEFAULT_ATTENDANCE_DAYS=MON,TUE,WED,THU,FRI
-DEFAULT_ATTENDANCE_START=21:30
-DEFAULT_LATE_DEADLINE=21:40
-DEFAULT_CLOSE_DEADLINE=21:45
-DEFAULT_EXCUSE_MODE=officer_approval
-```
-
-### 4. Run
-
-```powershell
-.\venv\Scripts\python.exe -m bot.main
-```
+`DEVELOPMENT_GUILD_ID`를 설정하면 그 서버에만 즉시 동기화되어 명령 변경을 바로 확인할 수 있습니다. 비우면 글로벌 동기화(반영까지 최대 1시간)입니다.
 
 처음 실행하면 다음 작업이 자동으로 진행됩니다.
 
-1. SQLite DB 파일(`data/attendance.db`, 실행 폴더 기준 고정)과 `data/` 디렉터리를 준비합니다.
+1. `DATA_DIR`(기본 `data/`)에 SQLite DB 파일을 준비합니다.
 2. `bot/db/migrations/*.sql`을 버전 순서대로 적용합니다.
-3. Cog를 등록하고 `DEVELOPMENT_GUILD_ID` 서버에 slash command를 동기화합니다.
+3. Cog를 등록하고 slash command를 동기화합니다.
 4. 누락된 출석 마감 처리를 복구합니다.
 5. 출석/백업 스케줄러를 시작합니다.
 
@@ -165,7 +145,8 @@ DEFAULT_EXCUSE_MODE=officer_approval
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | Yes | - | Discord Bot Token (`DISCORD_TOKEN` also accepted) |
-| `DEVELOPMENT_GUILD_ID` | Yes | - | Slash command sync target guild |
+| `DEVELOPMENT_GUILD_ID` | No | - | Set for instant guild-only sync while developing; empty = global sync |
+| `DATA_DIR` | No | `data/` | Directory for SQLite DB and `backups/` |
 | `TIMEZONE` | No | `Asia/Seoul` | Default guild timezone |
 | `LOG_LEVEL` | No | `INFO` | Python logging level |
 | `DEFAULT_ATTENDANCE_DAYS` | No | `MON,TUE,WED,THU,FRI` | Default attendance weekdays |
@@ -212,42 +193,26 @@ DEFAULT_EXCUSE_MODE=officer_approval
 - `003_excuse_requests.sql`: 사유 신청
 - `004_evaluations.sql`: 평가와 수동 점수 조정
 - `005_stage_a_voice_verification.sql`: 음성 검증
-- `006_stage_b_attendance_adjustments.sql`: 지각 감면과 결석 면제
+- `006_stage_b_attendance_adjustments.sql`: 지각 감면과 결석 면제 (기능은 제거됨, 테이블은 이력상 유지)
 - `007_stage_c_seasons_achievements_officers.sql`: 시즌, 업적, 칭호, 간부 인사 (기능은 제거됨, 테이블은 이력상 유지)
 - `008_excuse_deadline_policy.sql`: 사유 신청 마감 정책, 사유 유형, 승인 처리 메타데이터
 
 운영 DB 배포 전에는 항상 SQLite 파일을 백업하세요.
 
-### Full Data Reset
+### Backup And Reset
 
-운영 데이터 전체 초기화는 명시적으로 실행해야 하며, 실행 직전에 현재 SQLite DB가 `backups/before_policy_reset_YYYYMMDD_HHMMSS.db`로 자동 백업됩니다. 이 명령은 출석 기록, 사용자, 점수, 서버 설정, 사유 신청 등 운영 테이블을 비우지만 마이그레이션 이력은 보존합니다.
-
-```powershell
-AttendanceBotManager.exe --reset-all-data
-```
-
-또는 소스 실행 환경에서는 다음 명령을 사용합니다.
-
-```powershell
-.\venv\Scripts\python.exe manager_main.py --reset-all-data
-```
-
-실행 후 정확히 `RESET ALL DATA`를 입력해야 초기화가 진행됩니다. 문구가 다르면 작업은 취소됩니다.
+- 백업 스케줄러가 하루 한 번 `DATA_DIR/backups/attendance-YYYYMMDD-HHMMSS.db`를 만들고 최근 14개를 보관합니다.
+- 복원: 봇을 멈추고(`docker compose stop`) 백업 파일을 `data/attendance.db`로 복사한 뒤 다시 시작합니다.
+- 전체 초기화: 봇을 멈추고 `data/attendance.db`(및 `-wal`, `-shm`)를 삭제하면 다음 시작 때 빈 DB가 만들어집니다. Discord에서 `/설정 초기화`부터 다시 진행합니다.
 
 ## Testing
 
 ```powershell
 .\venv\Scripts\python.exe -m pytest -q --basetemp=.tmp_full -p no:cacheprovider
-.\venv\Scripts\python.exe -m compileall -q bot tests
-.\venv\Scripts\python.exe -m pip check
+.\venv\Scripts\python.exe -m ruff check bot tests main.py
 ```
 
-현재 검증 결과:
-
-```text
-124 passed
-No broken requirements found.
-```
+현재 검증 결과: `110 passed`
 
 ## Operations Checklist
 
@@ -265,12 +230,12 @@ No broken requirements found.
 - 운영자는 `/출석 현황`으로 미체크 인원을 확인합니다.
 - 사유가 있으면 `/사유 신청`, `/사유 승인`, `/사유 거절` 흐름을 사용합니다.
 - 잘못된 기록은 `/출석 수정`으로 정정합니다.
-- 승인된 사유에 대한 감면/면제와 평가는 `/점수 ...` 그룹을 사용합니다.
+- 평가와 수동 점수 조정은 `/점수 ...` 그룹을 사용합니다.
 
 안전 원칙:
 
 - 기존 점수 이벤트는 수정하지 않고 새 보정 이벤트를 추가합니다.
-- 오늘 세션 취소/재개, 감면/면제 취소는 모두 반대 점수 이벤트로 되돌립니다.
+- 오늘 세션 취소/재개와 평가 취소는 모두 반대 점수 이벤트로 되돌립니다.
 
 ## English Summary
 
@@ -284,6 +249,5 @@ It supports:
 - Score ledger and rank calculation
 - Public/personal/weekly reports
 - Voice attendance verification
-- Late reduction and absence exemption
 
 Run `/도움말` in Discord to see group-based usage, parameters, and permissions. The project keeps score history append-only.

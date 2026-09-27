@@ -38,7 +38,6 @@ SETTING_FIELD_CHOICES = [
         "voice_verification_enabled",
         "voice_channel_ids",
         "voice_category_ids",
-        "exempt_absence_counts_in_attendance_denominator",
     )
 ]
 

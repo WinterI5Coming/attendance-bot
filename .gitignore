@@ -1,10 +1,8 @@
 # Environment and secrets
 .env
 
-# Runtime locks and logs
-*.lock
-logs/*.log
-logs/*.log.*
+# Logs
+logs/
 
 # Virtual environments
 .venv/
@@ -32,4 +30,3 @@ __pycache__/
 # Build outputs
 build/
 dist/
-release/

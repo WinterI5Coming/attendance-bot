@@ -17,7 +17,6 @@ from bot.cogs.settings import SettingsCog
 from bot.cogs.voice_tracking import VoiceTrackingCog
 from bot.config import Settings
 from bot.db.database import Database
-from bot.repositories.adjustment_repository import AdjustmentRepository
 from bot.repositories.attendance_repository import AttendanceRepository
 from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.evaluation_repository import EvaluationRepository
@@ -31,7 +30,6 @@ from bot.repositories.stage_a_repository import StageARepository
 from bot.runtime.time_provider import TimeProvider
 from bot.scheduler.attendance_loop import AttendanceScheduler
 from bot.scheduler.backup_loop import BackupScheduler
-from bot.services.adjustment_service import AdjustmentService
 from bot.services.admin_service import AdminService
 from bot.services.attendance_service import AttendanceService
 from bot.services.backup_service import BackupService
@@ -77,7 +75,6 @@ class RepositorySet:
     excuse: ExcuseRepository
     evaluation: EvaluationRepository
     stage_a: StageARepository
-    adjustment: AdjustmentRepository
 
 
 @dataclass(frozen=True)
@@ -92,7 +89,6 @@ class ServiceSet:
     excuse: ExcuseService
     evaluation: EvaluationService
     admin: AdminService
-    adjustment: AdjustmentService
     voice_verification: VoiceVerificationService
 
 
@@ -154,7 +150,6 @@ def create_repositories(database: Database) -> RepositorySet:
         excuse=ExcuseRepository(database=database),
         evaluation=EvaluationRepository(database=database),
         stage_a=StageARepository(database=database),
-        adjustment=AdjustmentRepository(database=database),
     )
 
 
@@ -242,17 +237,6 @@ def create_services(*, settings: Settings, repositories: RepositorySet) -> Servi
         audit_repository=repositories.audit,
     )
 
-    adjustment_service = AdjustmentService(
-        guild_repository=repositories.guild,
-        member_repository=repositories.member,
-        session_repository=repositories.session,
-        attendance_repository=repositories.attendance,
-        excuse_repository=repositories.excuse,
-        score_repository=repositories.score,
-        audit_repository=repositories.audit,
-        adjustment_repository=repositories.adjustment,
-    )
-
     return ServiceSet(
         guild=guild_service,
         member=member_service,
@@ -262,7 +246,6 @@ def create_services(*, settings: Settings, repositories: RepositorySet) -> Servi
         excuse=excuse_service,
         evaluation=evaluation_service,
         admin=admin_service,
-        adjustment=adjustment_service,
         voice_verification=voice_verification_service,
     )
 
@@ -296,7 +279,7 @@ def create_schedulers(
     backup_scheduler = BackupScheduler(
         backup_service=BackupService(
             database=database,
-            backup_directory=settings.db_path.parent.parent / "backups",
+            backup_directory=settings.db_path.parent / "backups",
         ),
         time_provider=time_provider,
     )
@@ -346,7 +329,6 @@ def create_cogs(
         ),
         ScoresCog(
             evaluation_service=services.evaluation,
-            adjustment_service=services.adjustment,
             guild_service=services.guild,
             time_provider=time_provider,
         ),

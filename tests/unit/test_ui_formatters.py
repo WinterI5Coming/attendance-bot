@@ -1,7 +1,6 @@
 """Discord UI 포매터의 기본 동작을 검증한다."""
 
 from bot.ui.formatters import (
-    format_adjustment_status,
     format_attendance_status,
     format_bool,
     format_score,
@@ -22,7 +21,6 @@ def test_status_formatters_translate_known_codes():
 
     assert format_attendance_status("PRESENT") == "정상 출석"
     assert format_attendance_status("EXCUSED_ABSENT") == "사유 결석"
-    assert format_adjustment_status("ACTIVE") == "활성"
     assert format_bool(True) == "사용"
     assert format_bool(False) == "미사용"
 

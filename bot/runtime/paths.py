@@ -1,33 +1,18 @@
-"""Path helpers for local Python and PyInstaller execution."""
+"""프로젝트 루트와 런타임 디렉터리 경로 헬퍼."""
 
-import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def get_app_directory() -> Path:
-    """Return the directory used for persistent runtime files.
+    """데이터, 로그, `.env`가 위치하는 프로젝트 루트를 반환한다."""
 
-    In a PyInstaller executable this is the folder containing the exe. During
-    normal Python execution it is the project root.
-    """
-
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(__file__).resolve().parents[2]
-
-
-def get_resource_directory() -> Path:
-    """Return the directory used for bundled read-only resources."""
-
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS).resolve()  # type: ignore[attr-defined]
-
-    return Path(__file__).resolve().parents[2]
+    return PROJECT_ROOT
 
 
 def ensure_runtime_directories(app_directory: Path) -> tuple[Path, Path]:
-    """Create and return the data and log directories."""
+    """data와 logs 디렉터리를 만들고 경로를 반환한다."""
 
     data_directory = app_directory / "data"
     logs_directory = app_directory / "logs"
