@@ -26,10 +26,6 @@ EXCUSE_DEADLINE_TIME=23:00
 EXCUSE_DEADLINE_DAYS_BEFORE=1
 REQUIRE_EXCUSE_APPROVAL=true
 ALLOW_LATE_EXCUSE=false
-
-# Stage C season and officer-review commands are preserved but hidden by default.
-# Set this to true only after validating season workflows in a staging guild.
-ENABLE_SEASONS=false
 """
 
 ALLOWED_ATTENDANCE_DAYS = {
@@ -80,7 +76,6 @@ class Settings:
     default_excuse_deadline_days_before: int
     default_require_excuse_approval: bool
     default_allow_late_excuse: bool
-    enable_seasons: bool
 
 
 def _parse_time(value: str, variable_name: str) -> time:
@@ -238,8 +233,6 @@ def load_settings(app_directory: Path = PROJECT_ROOT) -> Settings:
         "ALLOW_LATE_EXCUSE",
     )
 
-    enable_seasons = _parse_bool(os.getenv("ENABLE_SEASONS", "false"), "ENABLE_SEASONS")
-
     return Settings(
         discord_token=discord_token,
         development_guild_id=development_guild_id,
@@ -255,5 +248,4 @@ def load_settings(app_directory: Path = PROJECT_ROOT) -> Settings:
         default_excuse_deadline_days_before=excuse_deadline_days_before,
         default_require_excuse_approval=require_excuse_approval,
         default_allow_late_excuse=allow_late_excuse,
-        enable_seasons=enable_seasons,
     )

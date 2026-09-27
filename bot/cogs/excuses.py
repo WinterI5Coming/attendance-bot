@@ -1,4 +1,4 @@
-"""Slash commands for excuse requests and approvals."""
+"""사유 신청, 승인, 정책 슬래시 명령어(`/사유 ...`)를 제공한다."""
 
 import logging
 
@@ -29,6 +29,12 @@ EXCUSE_TYPE_CHOICES = [
 class ExcusesCog(commands.Cog):
     """Provide user and officer excuse request commands."""
 
+    excuses = app_commands.Group(
+        name="사유",
+        description="결석/지각/조퇴 사유 신청과 승인을 처리합니다.",
+        guild_only=True,
+    )
+
     def __init__(
         self,
         *,
@@ -40,11 +46,7 @@ class ExcusesCog(commands.Cog):
         self.guild_service = guild_service
         self.time_provider = time_provider or TimeProvider()
 
-    @app_commands.command(
-        name="사유신청",
-        description="결석/지각/조퇴 사유를 신청합니다.",
-    )
-    @app_commands.guild_only()
+    @excuses.command(name="신청", description="결석/지각/조퇴 사유를 신청합니다.")
     @app_commands.rename(target_date="날짜", excuse_type="유형", reason="사유")
     @app_commands.describe(
         target_date="YYYY-MM-DD 형식의 대상 출석일",
@@ -92,11 +94,7 @@ class ExcusesCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="사유취소",
-        description="대기 중인 내 사유 신청을 취소합니다.",
-    )
-    @app_commands.guild_only()
+    @excuses.command(name="취소", description="대기 중인 내 사유 신청을 취소합니다.")
     @app_commands.rename(excuse_request_id="신청id")
     async def cancel_excuse(
         self,
@@ -120,8 +118,7 @@ class ExcusesCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="사유목록", description="사유 신청 목록을 조회합니다.")
-    @app_commands.guild_only()
+    @excuses.command(name="목록", description="사유 신청 목록을 조회합니다.")
     @app_commands.rename(include_all="전체조회", status="상태")
     @app_commands.choices(
         status=[
@@ -155,8 +152,7 @@ class ExcusesCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="사유승인", description="대기 중인 사유 신청을 승인합니다.")
-    @app_commands.guild_only()
+    @excuses.command(name="승인", description="대기 중인 사유 신청을 승인합니다.")
     @app_commands.rename(excuse_request_id="신청id")
     async def approve_excuse(
         self,
@@ -179,8 +175,7 @@ class ExcusesCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="사유거절", description="대기 중인 사유 신청을 거절합니다.")
-    @app_commands.guild_only()
+    @excuses.command(name="거절", description="대기 중인 사유 신청을 거절합니다.")
     @app_commands.rename(excuse_request_id="신청id", rejection_reason="거절사유")
     async def reject_excuse(
         self,
@@ -205,8 +200,7 @@ class ExcusesCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="사유상세", description="사유 신청 상세를 조회합니다.")
-    @app_commands.guild_only()
+    @excuses.command(name="상세", description="사유 신청 상세를 조회합니다.")
     @app_commands.rename(excuse_request_id="신청id")
     async def excuse_detail(
         self,
@@ -231,11 +225,7 @@ class ExcusesCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="사유예외등록",
-        description="관리자가 마감 이후 긴급 예외 사유를 등록합니다.",
-    )
-    @app_commands.guild_only()
+    @excuses.command(name="예외등록", description="관리자가 마감 이후 긴급 예외 사유를 등록합니다.")
     @app_commands.rename(
         member="사용자",
         target_date="날짜",
@@ -273,56 +263,66 @@ class ExcusesCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="사유정책설정",
-        description="사유 신청 마감 시간을 변경합니다.",
+    @excuses.command(name="정책", description="사유 신청 정책을 조회하거나, 마감 시간을 변경하거나, 채널에 공지합니다.")
+    @app_commands.rename(deadline_time="마감시간", deadline_days_before="마감일수", announce="공지")
+    @app_commands.describe(
+        deadline_time="변경할 마감 시각 (HH:MM). 마감일수와 함께 입력하면 정책을 변경합니다.",
+        deadline_days_before="변경할 마감 일수 (출석일 N일 전)",
+        announce="True면 현재 정책을 채널에 공개 공지합니다.",
     )
-    @app_commands.guild_only()
-    @app_commands.rename(deadline_time="마감시간", deadline_days_before="마감일수")
-    async def update_policy(
+    async def policy(
         self,
         interaction: discord.Interaction,
-        deadline_time: str,
-        deadline_days_before: int,
+        deadline_time: str | None = None,
+        deadline_days_before: int | None = None,
+        announce: bool = False,
     ) -> None:
-        """Handle `/사유정책설정`."""
+        """/사유 정책 명령을 처리한다.
 
-        if await require_officer(interaction, self.guild_service) is None:
+        인자가 없으면 현재 정책을 비공개로 보여 주고, 마감시간과 마감일수를
+        함께 주면 정책을 변경하며, 공지=True면 현재 정책을 채널에 공개한다.
+        변경과 공지는 간부 이상만 실행할 수 있다.
+        """
+
+        wants_update = deadline_time is not None or deadline_days_before is not None
+        if wants_update and (deadline_time is None or deadline_days_before is None):
+            await interaction.response.send_message(
+                "정책을 변경하려면 마감시간과 마감일수를 모두 입력해주세요.",
+                ephemeral=True,
+            )
             return
-        assert interaction.guild is not None
-        result = await self.excuse_service.update_policy(
-            guild_id=interaction.guild.id,
-            actor_discord_id=interaction.user.id,
-            deadline_time=deadline_time,
-            deadline_days_before=deadline_days_before,
-            now=self.time_provider.now_utc(),
-        )
-        await interaction.response.send_message(
-            self._message_for_status(result),
-            ephemeral=True,
-        )
 
-    @app_commands.command(name="사유정책조회", description="현재 사유 신청 정책을 조회합니다.")
-    @app_commands.guild_only()
-    async def view_policy(self, interaction: discord.Interaction) -> None:
-        """Handle `/사유정책조회`."""
-
-        settings = await require_guild_settings(interaction, self.guild_service)
-        if settings is None:
+        if not wants_update and not announce:
+            settings = await require_guild_settings(interaction, self.guild_service)
+            if settings is None:
+                return
+            await interaction.response.send_message(
+                self._build_policy_message(settings),
+                ephemeral=True,
+            )
             return
-        await interaction.response.send_message(
-            self._build_policy_message(settings),
-            ephemeral=True,
-        )
-
-    @app_commands.command(name="사유정책공지", description="출석 사유 신청 정책을 공지합니다.")
-    @app_commands.guild_only()
-    async def announce_policy(self, interaction: discord.Interaction) -> None:
-        """Handle `/사유정책공지`."""
 
         settings = await require_officer(interaction, self.guild_service)
         if settings is None:
             return
+        assert interaction.guild is not None
+
+        if wants_update:
+            result = await self.excuse_service.update_policy(
+                guild_id=interaction.guild.id,
+                actor_discord_id=interaction.user.id,
+                deadline_time=deadline_time,
+                deadline_days_before=deadline_days_before,
+                now=self.time_provider.now_utc(),
+            )
+            if result.status is not ExcuseStatus.POLICY_UPDATED or not announce:
+                await interaction.response.send_message(
+                    self._message_for_status(result),
+                    ephemeral=True,
+                )
+                return
+            settings = await self.guild_service.get_settings(interaction.guild.id) or settings
+
         await interaction.response.send_message(self._build_policy_notice(settings))
 
     def _build_create_message(self, result: ExcuseResult) -> str:
@@ -422,7 +422,7 @@ class ExcusesCog(commands.Cog):
             "[출석 사유 신청 안내]\n\n"
             f"결석, 지각 또는 조퇴가 예상되는 경우 대상 출석일 {days}일 전 "
             f"{time_text}까지 사유를 신청해주세요.\n\n"
-            "사유 신청 명령어: /사유신청\n\n"
+            "사유 신청 명령어: /사유 신청\n\n"
             "사유 신청은 관리자 승인 후 효력이 발생합니다.\n"
             "마감 이후에는 일반 신청이 불가능합니다.\n\n"
             "사고, 응급 질병 등 긴급한 사정은 관리자에게 별도로 문의해주세요.\n\n"

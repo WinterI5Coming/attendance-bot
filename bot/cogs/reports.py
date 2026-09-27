@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.cogs.common import require_guild
+from bot.cogs.common import NOT_CONFIGURED_MESSAGE, require_guild
 from bot.runtime.time_provider import TimeProvider
 from bot.services.report_service import (
     PersonalReportResult,
@@ -34,13 +34,23 @@ class ReportsCog(commands.Cog):
         self.report_service = report_service
         self.time_provider = time_provider or TimeProvider()
 
-    @app_commands.command(name="내정보", description="내 출석 통계와 점수를 조회합니다.")
+    @app_commands.command(name="내정보", description="내 출석 통계와 점수를 조회합니다. 사용자를 지정하면 공개 리포트를 보여줍니다.")
     @app_commands.guild_only()
-    async def my_info(self, interaction: discord.Interaction) -> None:
+    @app_commands.rename(target_member="사용자")
+    @app_commands.describe(target_member="지정하면 해당 사용자의 공개 리포트를 채널에 표시합니다.")
+    async def my_info(
+        self,
+        interaction: discord.Interaction,
+        target_member: discord.Member | None = None,
+    ) -> None:
         """/내정보 명령을 처리한다."""
 
         guild = await require_guild(interaction)
         if guild is None:
+            return
+
+        if target_member is not None:
+            await self._send_public_report(interaction, guild, target_member)
             return
 
         try:
@@ -85,19 +95,13 @@ class ReportsCog(commands.Cog):
             ephemeral=False,
         )
 
-    @app_commands.command(name="리포트", description="대상자의 공개 가능한 근태 리포트를 조회합니다.")
-    @app_commands.guild_only()
-    @app_commands.rename(target_member="사용자")
-    async def public_report(
+    async def _send_public_report(
         self,
         interaction: discord.Interaction,
+        guild: discord.Guild,
         target_member: discord.Member,
     ) -> None:
-        """/리포트 명령을 처리한다."""
-
-        guild = await require_guild(interaction)
-        if guild is None:
-            return
+        """대상 사용자의 공개 가능한 근태 리포트를 채널에 표시한다."""
 
         try:
             result = await self.report_service.get_public_report(
@@ -188,7 +192,7 @@ class ReportsCog(commands.Cog):
         """랭킹 응답 메시지를 만든다."""
 
         if not result.configured:
-            return "초기설정이 필요합니다."
+            return NOT_CONFIGURED_MESSAGE
 
         entries = result.entries or []
         if not entries:
@@ -289,7 +293,7 @@ class ReportsCog(commands.Cog):
         """서버 주간 리포트 메시지를 만든다."""
 
         if not result.configured:
-            return "초기설정이 필요합니다."
+            return NOT_CONFIGURED_MESSAGE
 
         row_lines = []
         for row in (result.member_rows or [])[:10]:

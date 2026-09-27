@@ -1,4 +1,4 @@
-"""출석 대상 대원의 등록, 제외, 조회 슬래시 명령어를 제공한다."""
+"""출석 대상 대원의 등록, 제외, 조회 슬래시 명령어(`/대원 ...`)를 제공한다."""
 
 import logging
 
@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 class MembersCog(commands.Cog):
     """대원 등록, 제외, 목록 조회 관련 슬래시 명령어."""
 
+    members = app_commands.Group(
+        name="대원",
+        description="출석 대상 대원을 등록, 제외, 조회합니다.",
+        guild_only=True,
+    )
+
     def __init__(
         self,
         guild_service: GuildService,
@@ -33,11 +39,7 @@ class MembersCog(commands.Cog):
         self.guild_service = guild_service
         self.member_service = member_service
 
-    @app_commands.command(
-        name="대원등록",
-        description="Discord 사용자를 출석 대원으로 등록합니다.",
-    )
-    @app_commands.guild_only()
+    @members.command(name="등록", description="Discord 사용자를 출석 대원으로 등록합니다.")
     @app_commands.rename(
         target_member="사용자",
     )
@@ -103,11 +105,7 @@ class MembersCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="대원제외",
-        description="대원을 이후 출석 대상에서 제외합니다.",
-    )
-    @app_commands.guild_only()
+    @members.command(name="제외", description="대원을 이후 출석 대상에서 제외합니다.")
     @app_commands.rename(
         target_member="사용자",
         reason="사유",
@@ -177,11 +175,7 @@ class MembersCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="대원목록",
-        description="현재 서버의 활성 대원 목록을 조회합니다.",
-    )
-    @app_commands.guild_only()
+    @members.command(name="목록", description="현재 서버의 활성 대원 목록을 조회합니다.")
     async def list_members(
         self,
         interaction: discord.Interaction,

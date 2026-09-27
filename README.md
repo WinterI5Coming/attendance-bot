@@ -1,7 +1,7 @@
 # Discord Attendance Bot
 
-> Discord 서버의 출석, 사유 신청, 점수, 시즌, 업적, 간부 인사를 SQLite 기반으로 관리하는 근태관리봇입니다.  
-> A SQLite-backed Discord attendance bot for check-ins, excuses, scores, seasons, achievements, and officer reviews.
+> Discord 서버의 출석, 사유 신청, 점수, 리포트를 SQLite 기반으로 관리하는 근태관리봇입니다.  
+> A SQLite-backed Discord attendance bot for check-ins, excuses, scores, and reports.
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Discord.py](https://img.shields.io/badge/discord.py-slash%20commands-5865F2)
@@ -25,14 +25,13 @@
 
 이 프로젝트는 Discord 커뮤니티의 반복적인 근태 운영을 자동화합니다. 대원을 등록하고, 매일 정해진 시간에 출석 세션을 열고, 출석/지각/결석/사유 처리를 점수 장부와 함께 관리합니다.
 
-The bot is designed for communities that need repeatable attendance operations: daily check-in sessions, officer approvals, attendance corrections, score ledgers, seasonal rankings, achievements, and audited role changes.
+The bot is designed for communities that need repeatable attendance operations: daily check-in sessions, officer approvals, attendance corrections, score ledgers, and rankings.
 
 핵심 원칙:
 
 - 기존 점수 기록은 삭제하거나 수정하지 않고 `score_events`에 보정 이벤트를 추가합니다.
 - 마이그레이션은 버전 순서대로 추가하며 기존 migration 파일을 수정하지 않습니다.
 - Discord 역할 변경은 DB 저장 이후에 수행하고, 성공/실패 이력을 별도로 남깁니다.
-- 개인 점수 계급과 Discord 간부/대원 역할은 서로 다른 정책으로 분리합니다.
 
 ## Features
 
@@ -45,44 +44,27 @@ The bot is designed for communities that need repeatable attendance operations: 
 - 리포트: 내 정보, 공개 리포트, 랭킹, 주간 보고
 - Stage A: 음성 채널 체류 기반 출석 검증
 - Stage B: 지각 감면, 결석 면제, 통계 반영
-- Stage C: 시즌, 시즌 랭킹, 업적, 칭호, 업적 역할, 간부 인사 미리보기/실행
 - 상세 도움말: Discord 안에서 `/도움말`로 명령 사용법 확인
 
 ## Command Guide
 
-봇 안에서 가장 자세한 사용법은 `/도움말` 명령으로 확인할 수 있습니다.
+명령은 기능별 그룹(`/그룹 하위명령`)으로 묶여 있으며, 봇 안에서 가장 자세한 사용법은 `/도움말` 명령으로 확인할 수 있습니다.
 
 ```text
 /도움말
-/도움말 카테고리:시작하기
-/도움말 카테고리:출석
-/도움말 카테고리:사유 신청
-/도움말 카테고리:리포트와 점수
-/도움말 카테고리:감면과 면제
-/도움말 카테고리:시즌과 업적
-/도움말 카테고리:간부 인사
+/도움말 카테고리:설정 | 대원 | 출석 | 사유 | 리포트 | 점수
 ```
 
-대표 명령:
-
-| Category | Command | Permission | Purpose |
-| --- | --- | --- | --- |
-| Setup | `/초기설정` | Server admin | 서버의 기본 역할과 채널을 설정합니다. |
-| Setup | `/대원등록` | Officer/admin | Discord 사용자를 출석 대상자로 등록합니다. |
-| Attendance | `/출석` | Registered member | 오늘 출석 세션에 체크인합니다. |
-| Attendance | `/출석현황` | Everyone | 오늘 출석 현황을 조회합니다. |
-| Attendance | `/출석수정` | Officer/admin | 특정 날짜의 출석 기록을 정정합니다. |
-| Excuse | `/사유신청` | Registered member | 지각/결석 사유를 신청합니다. |
-| Excuse | `/사유승인` | Officer/admin | 대기 중인 사유 신청을 승인합니다. |
-| Report | `/내정보` | Registered member | 내 점수, 계급, 출석률을 조회합니다. |
-| Report | `/랭킹` | Everyone | 서버 점수 랭킹을 조회합니다. |
-| Stage B | `/지각감면` | Officer/admin | 승인 사유 기반 지각 시간을 감면합니다. |
-| Stage B | `/결석면제` | Officer/admin | 승인 사유 기반 결석 감점을 면제합니다. |
-| Stage C | `/시즌생성` | Officer/admin | 새 시즌을 생성합니다. |
-| Stage C | `/시즌랭킹` | Everyone | 시즌별 랭킹을 조회합니다. |
-| Stage C | `/업적평가` | Officer/admin | 시즌 통계 기준 업적과 보상을 지급합니다. |
-| Stage C | `/간부인사미리보기` | Officer/admin | 역할 변경 없이 인사안을 저장합니다. |
-| Stage C | `/간부인사실행` | Server admin | 저장된 인사안을 실제 역할 변경으로 적용합니다. |
+| Group | Commands | Permission |
+| --- | --- | --- |
+| `/설정` | `초기화`(관리자), `조회`, `변경`, `출석시간`(관리자) | Officer/admin |
+| `/대원` | `등록`, `제외` | Officer/admin · `목록` Everyone |
+| `/출석` | `체크인`(대원), `현황`(모두), `수정`, `오늘취소`, `오늘재개` | Officer/admin |
+| `/사유` | `신청`, `취소`, `목록`, `정책` | Member · `상세`, `승인`, `거절`, `예외등록`, `정책`(변경/공지) Officer/admin |
+| `/점수` | `평가`, `평가취소`, `조정`, `지각감면`, `지각감면취소`, `결석면제`, `결석면제취소` | Officer/admin |
+| `/내정보 [사용자]` | 내 통계(비공개) 또는 지정 사용자의 공개 리포트 | Everyone |
+| `/랭킹`, `/주간보고` | 서버 랭킹, 주간 통계 | Everyone |
+| `/도움말`, `/핑` | 도움말, 상태 확인 | Everyone |
 
 ## Architecture
 
@@ -162,7 +144,6 @@ DEFAULT_ATTENDANCE_START=21:30
 DEFAULT_LATE_DEADLINE=21:40
 DEFAULT_CLOSE_DEADLINE=21:45
 DEFAULT_EXCUSE_MODE=officer_approval
-ENABLE_SEASONS=false
 ```
 
 ### 4. Run
@@ -196,17 +177,16 @@ ENABLE_SEASONS=false
 | `EXCUSE_DEADLINE_DAYS_BEFORE` | No | `1` | Cutoff date offset before the attendance date |
 | `REQUIRE_EXCUSE_APPROVAL` | No | `true` | New excuse requests require officer/admin approval |
 | `ALLOW_LATE_EXCUSE` | No | `false` | Registered members cannot submit after the cutoff |
-| `ENABLE_SEASONS` | No | `false` | Enables season and officer-review slash commands |
 
 ## Excuse Deadline Policy
 
 기본 사유 신청 정책은 `Asia/Seoul` 기준 출석일 전날 23:00까지 신청, 관리자 승인 필수, 마감 이후 일반 사용자 신청 불가입니다.
 
-- 사용자는 `/사유신청`에서 `결석`, `지각`, `조퇴` 유형을 선택해 신청합니다.
-- 신청은 `PENDING` 상태로 생성되고 `/사유승인` 이후 출석 판정과 점수에 반영됩니다.
-- 마감 이후 긴급 예외는 관리자/간부가 `/사유예외등록`으로 등록합니다.
-- 정책 확인은 `/사유정책조회`, 공개 공지는 `/사유정책공지`, 마감 시간 변경은 `/사유정책설정`을 사용합니다.
-- 환경 기본값은 새 서버 초기 설정에 적용되며, 이미 생성된 서버는 `/사유정책설정`으로 변경합니다.
+- 사용자는 `/사유 신청`에서 `결석`, `지각`, `조퇴` 유형을 선택해 신청합니다.
+- 신청은 `PENDING` 상태로 생성되고 `/사유 승인` 이후 출석 판정과 점수에 반영됩니다.
+- 마감 이후 긴급 예외는 관리자/간부가 `/사유 예외등록`으로 등록합니다.
+- 정책 확인은 `/사유 정책`, 마감 시간 변경은 `/사유 정책 마감시간:23:00 마감일수:1`, 공개 공지는 `/사유 정책 공지:True`를 사용합니다.
+- 환경 기본값은 새 서버 초기 설정에 적용되며, 이미 생성된 서버는 `/사유 정책`으로 변경합니다.
 
 ## Message Design
 
@@ -219,7 +199,7 @@ ENABLE_SEASONS=false
 공개 메시지와 비공개 메시지는 다음 기준을 따릅니다.
 
 - 공개 가능: 출석 시작/마감 공지, 랭킹, 주간 보고, 공개 프로필
-- 비공개 기본: 설정 변경, 권한 부족, 오류, 사유 상세, 점수 수동 조정, 업적 역할 설정, 간부 인사 미리보기
+- 비공개 기본: 설정 변경, 권한 부족, 오류, 사유 상세, 점수 수동 조정
 - 공개 메시지에는 DB 내부 ID, stack trace, dedup key, 파일 경로, 환경 변수, Token을 표시하지 않습니다.
 
 ## Database And Migrations
@@ -233,7 +213,7 @@ ENABLE_SEASONS=false
 - `004_evaluations.sql`: 평가와 수동 점수 조정
 - `005_stage_a_voice_verification.sql`: 음성 검증
 - `006_stage_b_attendance_adjustments.sql`: 지각 감면과 결석 면제
-- `007_stage_c_seasons_achievements_officers.sql`: 시즌, 업적, 칭호, 간부 인사
+- `007_stage_c_seasons_achievements_officers.sql`: 시즌, 업적, 칭호, 간부 인사 (기능은 제거됨, 테이블은 이력상 유지)
 - `008_excuse_deadline_policy.sql`: 사유 신청 마감 정책, 사유 유형, 승인 처리 메타데이터
 
 운영 DB 배포 전에는 항상 SQLite 파일을 백업하세요.
@@ -253,41 +233,6 @@ AttendanceBotManager.exe --reset-all-data
 ```
 
 실행 후 정확히 `RESET ALL DATA`를 입력해야 초기화가 진행됩니다. 문구가 다르면 작업은 취소됩니다.
-
-## Season Feature Status
-
-시즌 기능은 현재 **기본 비활성화** 상태입니다.
-
-- 기본값: `ENABLE_SEASONS=false`
-- 비활성화 시 등록하지 않는 명령: `/시즌생성`, `/시즌목록`, `/시즌시작`, `/시즌종료`, `/시즌취소`, `/시즌재집계`, `/시즌랭킹`, `/간부인사미리보기`, `/간부인사실행`
-- 보존되는 데이터: `seasons`, `season_member_stats`, `officer_reviews`, `officer_role_change_logs`
-- 계속 사용 가능한 기능: 기존 업적 조회, 칭호 조회, 칭호 장착/해제, 사용자 프로필
-- 활성화 방법: staging guild에서 검증한 뒤 `.env`에 `ENABLE_SEASONS=true`를 설정하고 봇을 재시작합니다.
-
-## Achievements And Titles
-
-일반 사용자 흐름:
-
-1. `/업적안내`로 업적과 칭호 사용법을 확인합니다.
-2. `/내업적`으로 획득한 업적을 확인합니다.
-3. `/내칭호`로 보유 칭호와 현재 장착 칭호를 확인합니다.
-4. `/칭호장착`에서 자동완성으로 보유 칭호를 선택합니다.
-5. `/사용자프로필`로 공개 가능한 업적/칭호 요약을 확인합니다.
-
-관리자 흐름:
-
-1. `/업적초기화`로 기본 업적 정의를 준비합니다.
-2. `/업적목록`에서 업적 코드와 보상 점수를 확인합니다.
-3. `/업적역할설정`으로 특정 업적과 Discord 역할을 연결합니다.
-4. `/업적역할목록`으로 현재 매핑을 확인합니다.
-5. 시즌 기능이 활성화된 서버에서만 `/업적평가`로 신규 업적 지급을 실행합니다.
-
-중요한 제약:
-
-- 칭호는 한 번에 하나만 장착할 수 있습니다.
-- 칭호 장착/해제는 점수에 영향을 주지 않습니다.
-- 업적 보상 점수는 기존 점수 이벤트를 수정하지 않고 새 `ACHIEVEMENT_REWARD` 이벤트로 추가됩니다.
-- 역할 부여가 실패해도 업적 획득 자체는 취소하지 않습니다. Discord 역할 권한과 역할 계층을 확인하세요.
 
 ## Testing
 
@@ -311,29 +256,21 @@ No broken requirements found.
 - Discord Developer Portal에서 Bot Token을 발급합니다.
 - Bot 권한에 `applications.commands`, 메시지 전송, 역할 관리 권한을 부여합니다.
 - Stage A 음성 검증을 사용할 경우 voice state intent를 활성화합니다.
-- `/초기설정` 실행 후 `/도움말 카테고리:시작하기`를 확인합니다.
-- `/대원등록`으로 출석 대상자를 등록합니다.
+- `/설정 초기화` 실행 후 `/도움말 카테고리:설정`을 확인합니다.
+- `/대원 등록`으로 출석 대상자를 등록합니다.
 
 일일 운영:
 
-- 대원은 `/출석`으로 체크인합니다.
-- 운영자는 `/출석현황`으로 미체크 인원을 확인합니다.
-- 사유가 있으면 `/사유신청`, `/사유승인`, `/사유거절` 흐름을 사용합니다.
-- 잘못된 기록은 `/출석수정`으로 정정합니다.
-
-시즌 운영:
-
-- `/시즌생성`으로 시즌을 만들고 `/시즌시작`으로 활성화합니다.
-- 필요할 때 `/시즌재집계`로 Stage A/B 반영 통계를 다시 계산합니다.
-- `/업적초기화`, `/업적역할설정`, `/업적평가`로 업적 보상을 관리합니다.
-- `/간부인사미리보기`로 먼저 확인하고, 서버 관리자만 `/간부인사실행`을 수행합니다.
+- 대원은 `/출석 체크인`으로 체크인합니다.
+- 운영자는 `/출석 현황`으로 미체크 인원을 확인합니다.
+- 사유가 있으면 `/사유 신청`, `/사유 승인`, `/사유 거절` 흐름을 사용합니다.
+- 잘못된 기록은 `/출석 수정`으로 정정합니다.
+- 승인된 사유에 대한 감면/면제와 평가는 `/점수 ...` 그룹을 사용합니다.
 
 안전 원칙:
 
-- Preview 명령은 Discord 역할을 변경하지 않습니다.
-- 역할 변경 결과는 `officer_role_change_logs`에 남습니다.
-- 서버 소유자와 관리자 계정은 간부 인사 보호 대상으로 취급됩니다.
 - 기존 점수 이벤트는 수정하지 않고 새 보정 이벤트를 추가합니다.
+- 오늘 세션 취소/재개, 감면/면제 취소는 모두 반대 점수 이벤트로 되돌립니다.
 
 ## English Summary
 
@@ -348,7 +285,5 @@ It supports:
 - Public/personal/weekly reports
 - Voice attendance verification
 - Late reduction and absence exemption
-- Seasons, achievements, titles, and achievement role rewards
-- Officer review preview and audited role execution
 
-Run `/help` equivalent command `/도움말` in Discord to see category-based usage, parameters, and permissions. The project keeps score history append-only and applies Discord role changes only after database state is committed.
+Run `/도움말` in Discord to see group-based usage, parameters, and permissions. The project keeps score history append-only.

@@ -23,5 +23,5 @@ def test_help_catalog_has_usage_permission_and_parameters():
             assert command.parameters
             command_names.add(command.name)
 
-    assert "/출석" in command_names
+    assert "/출석 체크인" in command_names
     assert "/도움말" not in command_names

@@ -7,18 +7,13 @@ from dataclasses import dataclass
 
 from discord.ext import commands
 
-from bot.cogs.achievements import AchievementsCog
-from bot.cogs.adjustments import AdjustmentsCog
 from bot.cogs.attendance import AttendanceCog
-from bot.cogs.evaluations import EvaluationsCog
 from bot.cogs.excuses import ExcusesCog
 from bot.cogs.help import HelpCog
 from bot.cogs.members import MembersCog
-from bot.cogs.officer_reviews import OfficerReviewsCog
 from bot.cogs.reports import ReportsCog
-from bot.cogs.seasons import SeasonsCog
+from bot.cogs.scores import ScoresCog
 from bot.cogs.settings import SettingsCog
-from bot.cogs.setup import SetupCog
 from bot.cogs.voice_tracking import VoiceTrackingCog
 from bot.config import Settings
 from bot.db.database import Database
@@ -33,7 +28,6 @@ from bot.repositories.report_repository import ReportRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
 from bot.repositories.stage_a_repository import StageARepository
-from bot.repositories.stage_c_repository import StageCRepository
 from bot.runtime.time_provider import TimeProvider
 from bot.scheduler.attendance_loop import AttendanceScheduler
 from bot.scheduler.backup_loop import BackupScheduler
@@ -47,11 +41,6 @@ from bot.services.guild_service import GuildService
 from bot.services.member_service import MemberService
 from bot.services.report_service import ReportService
 from bot.services.session_service import SessionService
-from bot.services.stage_c_service import (
-    AchievementService,
-    OfficerReviewService,
-    SeasonService,
-)
 from bot.services.streak_service import StreakService
 from bot.services.voice_verification_service import VoiceVerificationService
 
@@ -89,7 +78,6 @@ class RepositorySet:
     evaluation: EvaluationRepository
     stage_a: StageARepository
     adjustment: AdjustmentRepository
-    stage_c: StageCRepository
 
 
 @dataclass(frozen=True)
@@ -106,9 +94,6 @@ class ServiceSet:
     admin: AdminService
     adjustment: AdjustmentService
     voice_verification: VoiceVerificationService
-    season: SeasonService
-    achievement: AchievementService
-    officer_review: OfficerReviewService
 
 
 def create_bot_container(settings: Settings) -> BotContainer:
@@ -170,7 +155,6 @@ def create_repositories(database: Database) -> RepositorySet:
         evaluation=EvaluationRepository(database=database),
         stage_a=StageARepository(database=database),
         adjustment=AdjustmentRepository(database=database),
-        stage_c=StageCRepository(database=database),
     )
 
 
@@ -269,21 +253,6 @@ def create_services(*, settings: Settings, repositories: RepositorySet) -> Servi
         adjustment_repository=repositories.adjustment,
     )
 
-    season_service = SeasonService(
-        guild_repository=repositories.guild,
-        repository=repositories.stage_c,
-    )
-    achievement_service = AchievementService(
-        member_repository=repositories.member,
-        repository=repositories.stage_c,
-        season_service=season_service,
-    )
-    officer_review_service = OfficerReviewService(
-        guild_repository=repositories.guild,
-        repository=repositories.stage_c,
-        season_service=season_service,
-    )
-
     return ServiceSet(
         guild=guild_service,
         member=member_service,
@@ -295,9 +264,6 @@ def create_services(*, settings: Settings, repositories: RepositorySet) -> Servi
         admin=admin_service,
         adjustment=adjustment_service,
         voice_verification=voice_verification_service,
-        season=season_service,
-        achievement=achievement_service,
-        officer_review=officer_review_service,
     )
 
 
@@ -347,7 +313,7 @@ def create_cogs(
     기능별 Discord Cog를 생성한다.
 
     Args:
-        settings: 선택 기능 활성화 여부를 담은 실행 설정.
+        settings: 실행 환경 설정.
         services: Cog가 호출할 애플리케이션 서비스 묶음.
         time_provider: 모든 Cog가 공유하는 현재 시각 공급자.
 
@@ -355,9 +321,13 @@ def create_cogs(
         Discord 클라이언트에 등록할 Cog 목록.
     """
 
-    cogs: list[commands.Cog] = [
+    return [
         HelpCog(),
-        SetupCog(guild_service=services.guild, time_provider=time_provider),
+        SettingsCog(
+            admin_service=services.admin,
+            guild_service=services.guild,
+            time_provider=time_provider,
+        ),
         MembersCog(
             guild_service=services.guild,
             member_service=services.member,
@@ -365,6 +335,7 @@ def create_cogs(
         AttendanceCog(
             attendance_service=services.attendance,
             guild_service=services.guild,
+            admin_service=services.admin,
             time_provider=time_provider,
         ),
         ReportsCog(report_service=services.report, time_provider=time_provider),
@@ -373,17 +344,8 @@ def create_cogs(
             guild_service=services.guild,
             time_provider=time_provider,
         ),
-        EvaluationsCog(
+        ScoresCog(
             evaluation_service=services.evaluation,
-            guild_service=services.guild,
-            time_provider=time_provider,
-        ),
-        SettingsCog(
-            admin_service=services.admin,
-            guild_service=services.guild,
-            time_provider=time_provider,
-        ),
-        AdjustmentsCog(
             adjustment_service=services.adjustment,
             guild_service=services.guild,
             time_provider=time_provider,
@@ -392,30 +354,4 @@ def create_cogs(
             voice_verification_service=services.voice_verification,
             time_provider=time_provider,
         ),
-        AchievementsCog(
-            guild_service=services.guild,
-            achievement_service=services.achievement,
-            enable_season_awards=settings.enable_seasons,
-            time_provider=time_provider,
-        ),
     ]
-
-    if settings.enable_seasons:
-        cogs.extend(
-            [
-                SeasonsCog(
-                    guild_service=services.guild,
-                    season_service=services.season,
-                    time_provider=time_provider,
-                ),
-                OfficerReviewsCog(
-                    guild_service=services.guild,
-                    officer_review_service=services.officer_review,
-                    time_provider=time_provider,
-                ),
-            ]
-        )
-    else:
-        logger.info("Season and officer-review commands are disabled.")
-
-    return cogs
