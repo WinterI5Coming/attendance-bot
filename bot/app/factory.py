@@ -28,6 +28,7 @@ def create_bot(settings: Settings) -> AttendanceBot:
         backup_scheduler=container.backup_scheduler,
         time_provider=container.time_provider,
         cogs=container.cogs,
+        persistent_views=container.persistent_views,
     )
     register_lifecycle_events(bot)
     register_system_commands(bot)

@@ -16,7 +16,7 @@ def test_help_catalog_has_usage_permission_and_parameters():
         assert category.commands
 
         for command in category.commands:
-            assert command.name.startswith("/")
+            assert command.name.startswith("/") or "버튼" in command.name
             assert command.summary
             assert command.usage
             assert command.permission

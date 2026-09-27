@@ -109,11 +109,18 @@ GUIDE_CATEGORIES: tuple[GuideCategory, ...] = (
     GuideCategory(
         key="attendance",
         title="출석",
-        description="매일 사용하는 출석 체크와 세션 운영 명령입니다. (`/출석 ...`)",
+        description="매일 출석은 공지의 버튼으로, 그 외 운영은 `/출석 ...` 명령으로 처리합니다.",
         commands=(
             CommandGuide(
+                name="출석하기 버튼",
+                summary="출석 시작 공지에 붙은 [✅ 출석하기] 버튼을 누르면 바로 체크인됩니다. 마감되면 버튼이 잠깁니다.",
+                usage="공지 메시지의 버튼 클릭",
+                permission=MEMBER,
+                parameters="없음",
+            ),
+            CommandGuide(
                 name="/출석 체크인",
-                summary="오늘 열린 출석 세션에 체크인합니다.",
+                summary="버튼 대신 명령으로 체크인합니다. 결과는 동일합니다.",
                 usage="/출석 체크인",
                 permission=MEMBER,
                 parameters="없음",
@@ -151,21 +158,21 @@ GUIDE_CATEGORIES: tuple[GuideCategory, ...] = (
     GuideCategory(
         key="excuses",
         title="사유",
-        description="결석/지각/조퇴 사유 신청과 승인 흐름입니다. (`/사유 ...`)",
+        description="신청은 입력창, 승인/거절은 버튼으로 처리합니다. (`/사유 ...`)",
         commands=(
             CommandGuide(
                 name="/사유 신청",
-                summary="출석일 전에 결석/지각/조퇴 사유를 신청합니다. 간부 승인 후 반영됩니다.",
-                usage="/사유 신청 날짜:2026-07-03 유형:결석 사유:병원 진료",
+                summary="입력창이 열립니다. 유형(결석/지각/조퇴)을 고르고 날짜와 사유를 적어 제출하면 간부에게 알림이 갑니다.",
+                usage="/사유 신청 → 입력창 작성 → 제출",
                 permission=MEMBER,
-                parameters="날짜(YYYY-MM-DD), 유형, 사유(2~500자)",
+                parameters="입력창: 유형, 날짜(YYYY-MM-DD, 기본값 내일), 사유(2~500자)",
             ),
             CommandGuide(
                 name="/사유 취소",
                 summary="아직 처리되지 않은 내 사유 신청을 취소합니다.",
-                usage="/사유 취소 신청id:12",
+                usage="/사유 취소 신청번호:12",
                 permission=MEMBER,
-                parameters="신청id",
+                parameters="신청번호(/사유 목록에서 확인)",
             ),
             CommandGuide(
                 name="/사유 목록",
@@ -175,25 +182,11 @@ GUIDE_CATEGORIES: tuple[GuideCategory, ...] = (
                 parameters="상태(선택), 전체조회(간부)",
             ),
             CommandGuide(
-                name="/사유 상세",
-                summary="사유 신청 한 건의 상세 내용을 확인합니다.",
-                usage="/사유 상세 신청id:12",
+                name="/사유 검토",
+                summary="대기 중인 신청 목록에서 하나를 고르면 상세 내용과 [승인]/[거절] 버튼이 나타납니다. 접수 알림의 [검토하기] 버튼과 같습니다.",
+                usage="/사유 검토 → 신청 선택 → 승인 또는 거절",
                 permission=OFFICER,
-                parameters="신청id",
-            ),
-            CommandGuide(
-                name="/사유 승인",
-                summary="대기 중인 사유 신청을 승인하고 출석 판정에 반영합니다.",
-                usage="/사유 승인 신청id:12",
-                permission=OFFICER,
-                parameters="신청id",
-            ),
-            CommandGuide(
-                name="/사유 거절",
-                summary="대기 중인 사유 신청을 거절합니다.",
-                usage="/사유 거절 신청id:12 거절사유:증빙 부족",
-                permission=OFFICER,
-                parameters="신청id, 거절사유",
+                parameters="없음 (거절 시 사유 입력창)",
             ),
             CommandGuide(
                 name="/사유 예외등록",

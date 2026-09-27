@@ -77,14 +77,31 @@ def build_phase2_services(database, guild_repository, member_repository):
     )
 
 
+class FakeMessage:
+    """전송/수정된 메시지를 기록하는 최소 대역."""
+
+    def __init__(self, message_id: int, **kwargs) -> None:
+        self.id = message_id
+        self.kwargs = kwargs
+        self.edits: list[dict] = []
+
+    async def edit(self, **kwargs) -> None:
+        self.edits.append(kwargs)
+
+
 class FakeChannel:
     """Tiny Discord channel test double."""
 
     def __init__(self) -> None:
-        self.messages: list[str] = []
+        self.messages: list[FakeMessage] = []
 
-    async def send(self, content: str) -> None:
-        self.messages.append(content)
+    async def send(self, content: str | None = None, **kwargs) -> FakeMessage:
+        message = FakeMessage(len(self.messages) + 1, content=content, **kwargs)
+        self.messages.append(message)
+        return message
+
+    async def fetch_message(self, message_id: int) -> FakeMessage:
+        return self.messages[message_id - 1]
 
 
 class FakeBot:
@@ -291,7 +308,8 @@ async def test_scheduler_sends_start_and_close_announcements_once(
     )
 
     assert len(channel.messages) == 2
-    assert "출석이 시작되었습니다." in channel.messages[0]
-    assert "출석이 마감되었습니다." in channel.messages[1]
+    assert "출석이 시작되었습니다" in channel.messages[0].kwargs["embed"].title
+    assert "출석이 마감되었습니다" in channel.messages[1].kwargs["embed"].title
     assert session["start_announced_at"] is not None
+    assert session["start_announcement_message_id"] == "1"
     assert session["close_announced_at"] is not None

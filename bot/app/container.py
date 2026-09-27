@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+import discord
 from discord.ext import commands
 
 from bot.cogs.attendance import AttendanceCog
@@ -41,6 +42,8 @@ from bot.services.report_service import ReportService
 from bot.services.session_service import SessionService
 from bot.services.streak_service import StreakService
 from bot.services.voice_verification_service import VoiceVerificationService
+from bot.ui.views.attendance import CheckInView
+from bot.ui.views.excuses import ExcuseFlow, ExcuseNoticeView
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,7 @@ class BotContainer:
     backup_scheduler: BackupScheduler
     time_provider: TimeProvider
     cogs: list[commands.Cog]
+    persistent_views: list[discord.ui.View]
 
 
 @dataclass(frozen=True)
@@ -107,16 +111,27 @@ def create_bot_container(settings: Settings) -> BotContainer:
     time_provider = TimeProvider()
     repositories = create_repositories(database)
     services = create_services(settings=settings, repositories=repositories)
+    check_in_view = CheckInView(
+        attendance_service=services.attendance,
+        time_provider=time_provider,
+    )
+    excuse_flow = ExcuseFlow(
+        excuse_service=services.excuse,
+        guild_service=services.guild,
+        time_provider=time_provider,
+    )
     attendance_scheduler, backup_scheduler = create_schedulers(
         settings=settings,
         database=database,
         services=services,
         time_provider=time_provider,
+        check_in_view=check_in_view,
     )
     cogs = create_cogs(
         settings=settings,
         services=services,
         time_provider=time_provider,
+        excuse_flow=excuse_flow,
     )
 
     return BotContainer(
@@ -125,6 +140,7 @@ def create_bot_container(settings: Settings) -> BotContainer:
         backup_scheduler=backup_scheduler,
         time_provider=time_provider,
         cogs=cogs,
+        persistent_views=[check_in_view, ExcuseNoticeView(excuse_flow)],
     )
 
 
@@ -256,6 +272,7 @@ def create_schedulers(
     database: Database,
     services: ServiceSet,
     time_provider: TimeProvider,
+    check_in_view: CheckInView,
 ) -> tuple[AttendanceScheduler, BackupScheduler]:
     """
     Discord 봇과 함께 동작하는 백그라운드 스케줄러를 생성한다.
@@ -275,6 +292,7 @@ def create_schedulers(
         session_service=services.session,
         voice_verification_service=services.voice_verification,
         time_provider=time_provider,
+        check_in_view=check_in_view,
     )
     backup_scheduler = BackupScheduler(
         backup_service=BackupService(
@@ -291,6 +309,7 @@ def create_cogs(
     settings: Settings,
     services: ServiceSet,
     time_provider: TimeProvider,
+    excuse_flow: ExcuseFlow,
 ) -> list[commands.Cog]:
     """
     기능별 Discord Cog를 생성한다.
@@ -325,6 +344,7 @@ def create_cogs(
         ExcusesCog(
             excuse_service=services.excuse,
             guild_service=services.guild,
+            excuse_flow=excuse_flow,
             time_provider=time_provider,
         ),
         ScoresCog(

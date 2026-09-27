@@ -33,6 +33,7 @@ class AttendanceBot(commands.Bot):
         backup_scheduler: BackupScheduler,
         time_provider: TimeProvider,
         cogs: list[commands.Cog],
+        persistent_views: list[discord.ui.View] | None = None,
     ) -> None:
         """
         봇 클라이언트를 생성하고 종료 시 정리할 런타임 의존성을 저장한다.
@@ -44,6 +45,7 @@ class AttendanceBot(commands.Bot):
             backup_scheduler: 주기적 데이터베이스 백업 스케줄러.
             time_provider: 재시작 복구 시각을 공급하는 객체.
             cogs: Discord 명령과 이벤트 리스너를 담은 Cog 목록.
+            persistent_views: 재시작 후에도 버튼이 동작하도록 등록할 영속 뷰.
         """
 
         intents = discord.Intents.default()
@@ -59,6 +61,7 @@ class AttendanceBot(commands.Bot):
         self.backup_scheduler = backup_scheduler
         self.time_provider = time_provider
         self._configured_cogs = cogs
+        self._persistent_views = persistent_views or []
 
     async def setup_hook(self) -> None:
         """
@@ -74,6 +77,8 @@ class AttendanceBot(commands.Bot):
 
         for cog in self._configured_cogs:
             await self.add_cog(cog)
+        for view in self._persistent_views:
+            self.add_view(view)
 
         if self.settings.development_guild_id is not None:
             # 개발 중에는 특정 서버에만 동기화해 명령이 즉시 반영되게 한다.

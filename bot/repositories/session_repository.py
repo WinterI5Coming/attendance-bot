@@ -61,6 +61,7 @@ class SessionRepository:
                     cancelled_at,
                     cancel_reason,
                     start_announced_at,
+                    start_announcement_message_id,
                     close_announced_at,
                     created_at,
                     updated_at
@@ -116,6 +117,7 @@ class SessionRepository:
                     cancelled_at,
                     cancel_reason,
                     start_announced_at,
+                    start_announcement_message_id,
                     close_announced_at,
                     created_at,
                     updated_at
@@ -396,6 +398,7 @@ class SessionRepository:
                     cancelled_at,
                     cancel_reason,
                     start_announced_at,
+                    start_announcement_message_id,
                     close_announced_at,
                     created_at,
                     updated_at
@@ -471,6 +474,7 @@ class SessionRepository:
                     s.early_leave_penalty,
                     s.no_participation_penalty,
                     s.closed_at,
+                    s.start_announcement_message_id,
                     gs.attendance_channel_id,
                     gs.announcement_channel_id,
                     gs.timezone
@@ -492,8 +496,9 @@ class SessionRepository:
         *,
         session_id: int,
         now: str,
+        message_id: str | None = None,
     ) -> None:
-        """세션 시작 안내를 전송 완료로 표시한다."""
+        """세션 시작 안내를 전송 완료로 표시하고 공지 메시지 ID를 저장한다."""
 
         connection = await self.database.connect()
 
@@ -501,10 +506,12 @@ class SessionRepository:
             await connection.execute(
                 """
                 UPDATE attendance_sessions
-                SET start_announced_at = ?, updated_at = ?
+                SET start_announced_at = ?,
+                    start_announcement_message_id = ?,
+                    updated_at = ?
                 WHERE id = ? AND start_announced_at IS NULL;
                 """,
-                (now, now, session_id),
+                (now, message_id, now, session_id),
             )
             await connection.commit()
         except Exception:

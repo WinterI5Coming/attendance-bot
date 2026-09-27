@@ -57,5 +57,13 @@ def register_lifecycle_events(bot: AttendanceBot) -> None:
             getattr(interaction.user, "id", None),
             exc_info=error,
         )
+        message = "❌ 명령 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except Exception:
+            logger.debug("Failed to report slash command error to user.", exc_info=True)
 
     bot.tree.on_error = on_app_command_error

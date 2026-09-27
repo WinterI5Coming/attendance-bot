@@ -493,12 +493,19 @@ class SessionService:
 
         return await self.session_repository.list_close_announcement_targets()
 
-    async def mark_start_announced(self, *, session_id: int, now: datetime) -> None:
-        """세션 시작 안내가 전송되었음을 기록한다."""
+    async def mark_start_announced(
+        self,
+        *,
+        session_id: int,
+        now: datetime,
+        message_id: str | None = None,
+    ) -> None:
+        """세션 시작 안내가 전송되었음을 기록하고 공지 메시지 ID를 남긴다."""
 
         await self.session_repository.mark_start_announced(
             session_id=session_id,
             now=to_utc_iso(now),
+            message_id=message_id,
         )
 
     async def mark_close_announced(self, *, session_id: int, now: datetime) -> None:

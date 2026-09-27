@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Discord.py](https://img.shields.io/badge/discord.py-slash%20commands-5865F2)
 ![SQLite](https://img.shields.io/badge/Database-SQLite-003B57)
-![Tests](https://img.shields.io/badge/tests-110%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-121%20passed-brightgreen)
 
 ## Table Of Contents
 
@@ -38,8 +38,8 @@ The bot is designed for communities that need repeatable attendance operations: 
 - 서버별 초기 설정: 간부 역할, 출석 채널, 공지 채널, 출석 요일과 시간
 - 대원 관리: 등록, 제외, 활성 대원 목록 조회
 - 출석 세션 자동 운영: 세션 생성, 시작 공지, 마감 처리, 재시작 복구
-- 출석 체크: 정상 출석, 지각, 결석, 사유 지각/결석
-- 사유 신청: 신청, 취소, 승인, 거절, 감사 로그
+- 출석 체크: 출석 공지의 **[출석하기] 버튼** 한 번으로 체크인 (정상/지각/사유 판정, 마감 시 버튼 잠금)
+- 사유 신청: **입력창(모달)** 으로 신청 → 간부에게 접수 알림 → **[검토하기] 버튼**으로 승인/거절
 - 점수 장부: 출석 점수, 보정 점수, 평가 점수, 수동 조정, 취소 보정
 - 리포트: 내 정보, 공개 리포트, 랭킹, 주간 보고
 - Stage A: 음성 채널 체류 기반 출석 검증
@@ -58,8 +58,9 @@ The bot is designed for communities that need repeatable attendance operations: 
 | --- | --- | --- |
 | `/설정` | `초기화`(관리자), `조회`, `변경`, `출석시간`(관리자) | Officer/admin |
 | `/대원` | `등록`, `제외` | Officer/admin · `목록` Everyone |
-| `/출석` | `체크인`(대원), `현황`(모두), `수정`, `오늘취소`, `오늘재개` | Officer/admin |
-| `/사유` | `신청`, `취소`, `목록`, `정책` | Member · `상세`, `승인`, `거절`, `예외등록`, `정책`(변경/공지) Officer/admin |
+| 공지 버튼 | 출석 공지의 **[✅ 출석하기]**, 접수 알림의 **[🗂️ 검토하기]** | Member / Officer |
+| `/출석` | `체크인`(대원, 버튼과 동일), `현황`(모두), `수정`, `오늘취소`, `오늘재개` | Officer/admin |
+| `/사유` | `신청`(입력창), `취소`, `목록`, `정책` | Member · `검토`(선택+승인/거절 버튼), `예외등록`, `정책`(변경/공지) Officer/admin |
 | `/점수` | `평가`, `평가취소`, `조정` | Officer/admin |
 | `/내정보 [사용자]` | 내 통계(비공개) 또는 지정 사용자의 공개 리포트 | Everyone |
 | `/랭킹`, `/주간보고` | 서버 랭킹, 주간 통계 | Everyone |
@@ -95,6 +96,7 @@ bot/db/database.py  연결 관리, PRAGMA, SQL migration 적용
 | --- | --- |
 | `bot/app/` | Bot client, dependency container, lifecycle events, system commands |
 | `bot/cogs/` | Discord slash command handlers (`common.py` holds shared guards) |
+| `bot/ui/views/` | Persistent buttons, modals, select menus for check-in and excuse review |
 | `bot/services/` | Business rules and orchestration |
 | `bot/repositories/` | SQLite data access layer |
 | `bot/policies/` | Score and rank policies |
@@ -176,6 +178,17 @@ python main.py
 - `bot/ui/message_theme.py`: 성공, 정보, 경고, 오류, 관리자 메시지 색상
 - `bot/ui/embed_factory.py`: 표준 Embed 생성 규칙
 - `bot/ui/formatters.py`: 점수, 출석 상태, 검증 상태, 날짜/시간 표시
+- `bot/ui/*_messages.py`: 서비스 결과 → 메시지/Embed 변환 (Cog와 버튼이 공유)
+- `bot/ui/views/`: 영속 버튼(`CheckInView`, `ExcuseNoticeView`), 사유 신청 모달, 검토 선택 메뉴
+
+일일 흐름:
+
+1. 출석 시작 시각에 스케줄러가 공지 채널에 Embed + **[출석하기]** 버튼을 올립니다. 대원은 버튼만 누르면 됩니다.
+2. 마감되면 마감 공지를 올리고 시작 공지의 버튼을 **[출석 마감]** 으로 잠급니다.
+3. `/사유 신청`은 유형(선택)·날짜·사유 입력창을 띄우고, 접수되면 공지 채널에 **[검토하기]** 버튼이 달린 알림이 올라갑니다(사유 본문은 비공개).
+4. 간부가 버튼 또는 `/사유 검토`를 누르면 대기 목록 → 선택 → 상세 확인 → [승인]/[거절](거절 사유 입력창) 순서로 처리합니다.
+
+버튼은 `timeout=None` 영속 뷰로 등록되어 봇을 재시작해도 과거 공지의 버튼이 계속 동작합니다.
 
 공개 메시지와 비공개 메시지는 다음 기준을 따릅니다.
 
@@ -196,6 +209,7 @@ python main.py
 - `006_stage_b_attendance_adjustments.sql`: 지각 감면과 결석 면제 (기능은 제거됨, 테이블은 이력상 유지)
 - `007_stage_c_seasons_achievements_officers.sql`: 시즌, 업적, 칭호, 간부 인사 (기능은 제거됨, 테이블은 이력상 유지)
 - `008_excuse_deadline_policy.sql`: 사유 신청 마감 정책, 사유 유형, 승인 처리 메타데이터
+- `009_start_announcement_message.sql`: 출석 시작 공지 메시지 ID (마감 시 버튼 잠금용)
 
 운영 DB 배포 전에는 항상 SQLite 파일을 백업하세요.
 
@@ -212,7 +226,7 @@ python main.py
 .\venv\Scripts\python.exe -m ruff check bot tests main.py
 ```
 
-현재 검증 결과: `110 passed`
+현재 검증 결과: `121 passed`
 
 ## Operations Checklist
 
@@ -226,9 +240,9 @@ python main.py
 
 일일 운영:
 
-- 대원은 `/출석 체크인`으로 체크인합니다.
+- 대원은 출석 공지의 [출석하기] 버튼(또는 `/출석 체크인`)으로 체크인합니다.
 - 운영자는 `/출석 현황`으로 미체크 인원을 확인합니다.
-- 사유가 있으면 `/사유 신청`, `/사유 승인`, `/사유 거절` 흐름을 사용합니다.
+- 사유가 있으면 대원이 `/사유 신청` 입력창을 제출하고, 간부는 접수 알림의 [검토하기] 버튼(또는 `/사유 검토`)에서 승인/거절합니다.
 - 잘못된 기록은 `/출석 수정`으로 정정합니다.
 - 평가와 수동 점수 조정은 `/점수 ...` 그룹을 사용합니다.
 

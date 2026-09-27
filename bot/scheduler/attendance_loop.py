@@ -10,7 +10,12 @@ from bot.runtime.time_provider import TimeProvider
 from bot.services.guild_service import GuildService
 from bot.services.session_service import SessionService
 from bot.services.voice_verification_service import VoiceVerificationService
-from bot.utils.time_utils import format_local_hhmm
+from bot.ui.attendance_messages import (
+    build_close_announcement_embed,
+    build_start_announcement_embed,
+)
+from bot.ui.views.attendance import CheckInView
+from bot.utils.discord_channels import edit_channel_message, send_channel_message
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +31,7 @@ class AttendanceScheduler:
         voice_verification_service: VoiceVerificationService | None = None,
         time_provider: TimeProvider | None = None,
         bot: Any | None = None,
+        check_in_view: CheckInView | None = None,
     ) -> None:
         """
         스케줄러 의존성을 초기화한다.
@@ -36,6 +42,7 @@ class AttendanceScheduler:
             voice_verification_service: 음성 검증 마감 처리를 담당하는 서비스.
             time_provider: 주기 실행 시 현재 시각을 공급하는 객체.
             bot: 공지 전송에 사용할 Discord 클라이언트.
+            check_in_view: 시작 공지에 붙일 영속 [출석하기] 버튼 뷰.
         """
 
         self.guild_service = guild_service
@@ -43,6 +50,7 @@ class AttendanceScheduler:
         self.voice_verification_service = voice_verification_service
         self.time_provider = time_provider or TimeProvider()
         self.bot = bot
+        self.check_in_view = check_in_view
         self._started = False
 
     def start(self) -> None:
@@ -133,90 +141,52 @@ class AttendanceScheduler:
             logger.exception("Attendance scheduler tick failed.")
 
     async def _announce_starts(self, now: datetime) -> None:
-        """새로 열린 세션의 시작 안내를 전송한다."""
+        """새로 열린 세션의 시작 공지(+출석하기 버튼)를 전송한다."""
 
         if self.bot is None:
             return
 
-        sessions = (
-            await self.session_service.list_start_announcement_targets()
-        )
+        sessions = await self.session_service.list_start_announcement_targets()
         for session in sessions:
             channel_id = session["announcement_channel_id"] or session["attendance_channel_id"]
-            if await self._send_channel_message(
-                channel_id=channel_id,
-                content=self._build_start_message(session),
-            ):
-                await self.session_service.mark_start_announced(
-                    session_id=int(session["id"]),
-                    now=now,
-                )
+            message = await send_channel_message(
+                self.bot,
+                channel_id,
+                embed=build_start_announcement_embed(session),
+                view=self.check_in_view,
+            )
+            if message is None:
+                continue
+            await self.session_service.mark_start_announced(
+                session_id=int(session["id"]),
+                now=now,
+                message_id=str(getattr(message, "id", "")) or None,
+            )
 
     async def _announce_closes(self, now: datetime) -> None:
-        """마감된 세션의 종료 안내를 전송한다."""
+        """마감된 세션의 종료 공지를 보내고 시작 공지의 버튼을 비활성화한다."""
 
         if self.bot is None:
             return
 
-        sessions = (
-            await self.session_service.list_close_announcement_targets()
-        )
+        sessions = await self.session_service.list_close_announcement_targets()
         for session in sessions:
             channel_id = session["announcement_channel_id"] or session["attendance_channel_id"]
-            if await self._send_channel_message(
-                channel_id=channel_id,
-                content=self._build_close_message(session),
-            ):
-                await self.session_service.mark_close_announced(
-                    session_id=int(session["id"]),
-                    now=now,
+            if self.check_in_view is not None and session.get("start_announcement_message_id"):
+                await edit_channel_message(
+                    self.bot,
+                    channel_id,
+                    session["start_announcement_message_id"],
+                    view=self.check_in_view.closed(),
                 )
-
-    async def _send_channel_message(self, *, channel_id: str | None, content: str) -> bool:
-        """Discord 텍스트 채널을 찾을 수 있으면 메시지를 전송한다."""
-
-        if self.bot is None or not channel_id:
-            return False
-
-        try:
-            channel_id_int = int(channel_id)
-        except (TypeError, ValueError):
-            logger.warning("Invalid announcement channel id: %s", channel_id)
-            return False
-
-        channel = self.bot.get_channel(channel_id_int)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(channel_id_int)
-            except Exception:
-                logger.exception("Announcement channel lookup failed: %s", channel_id)
-                return False
-
-        try:
-            await channel.send(content)
-        except Exception:
-            logger.exception("Announcement send failed: channel_id=%s", channel_id)
-            return False
-        return True
-
-    def _build_start_message(self, session: dict[str, Any]) -> str:
-        """출석 시작 공지 메시지를 생성한다."""
-
-        timezone_name = session["timezone"]
-        return (
-            "🚀 출석이 시작되었습니다.\n"
-            f"⏰ 정상 출석 마감: {format_local_hhmm(datetime.fromisoformat(session['late_at']), timezone_name)}\n"
-            f"🔒 전체 마감: {format_local_hhmm(datetime.fromisoformat(session['close_at']), timezone_name)}\n"
-            "✅ 지금 /출석 체크인 명령어로 체크인해주세요."
-        )
-
-    def _build_close_message(self, session: dict[str, Any]) -> str:
-        """출석 마감 공지 메시지를 생성한다."""
-
-        timezone_name = session["timezone"]
-        closed_at = session["closed_at"] or session["close_at"]
-        return (
-            "🔒 출석이 마감되었습니다.\n"
-            f"🕒 마감 시각: {format_local_hhmm(datetime.fromisoformat(closed_at), timezone_name)}\n"
-            "📊 결과는 /출석 현황 또는 /랭킹에서 확인할 수 있습니다."
-        )
+            message = await send_channel_message(
+                self.bot,
+                channel_id,
+                embed=build_close_announcement_embed(session),
+            )
+            if message is None:
+                continue
+            await self.session_service.mark_close_announced(
+                session_id=int(session["id"]),
+                now=now,
+            )
