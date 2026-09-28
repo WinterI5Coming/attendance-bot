@@ -4,10 +4,13 @@ import logging
 from datetime import datetime
 from typing import Any
 
+import discord
 from discord.ext import tasks
 
+from bot.cogs.members import deactivate_departed_member
 from bot.runtime.time_provider import TimeProvider
 from bot.services.guild_service import GuildService
+from bot.services.member_service import MemberService
 from bot.services.session_service import SessionService
 from bot.services.voice_verification_service import VoiceVerificationService
 from bot.ui.attendance_messages import (
@@ -16,6 +19,7 @@ from bot.ui.attendance_messages import (
 )
 from bot.ui.views.attendance import CheckInView
 from bot.utils.discord_channels import edit_channel_message, send_channel_message
+from bot.utils.time_utils import get_server_today
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,7 @@ class AttendanceScheduler:
         time_provider: TimeProvider | None = None,
         bot: Any | None = None,
         check_in_view: CheckInView | None = None,
+        member_service: MemberService | None = None,
     ) -> None:
         """
         스케줄러 의존성을 초기화한다.
@@ -51,7 +56,10 @@ class AttendanceScheduler:
         self.time_provider = time_provider or TimeProvider()
         self.bot = bot
         self.check_in_view = check_in_view
+        self.member_service = member_service
         self._started = False
+        # 서버별로 대원 동기화를 마지막으로 실행한 서버 로컬 날짜.
+        self._membership_synced_on: dict[str, str] = {}
 
     def start(self) -> None:
         """아직 실행 중이 아니면 1분 주기 스케줄러 루프를 시작한다."""
@@ -87,6 +95,25 @@ class AttendanceScheduler:
         settings_rows = await self.guild_service.list_all_settings()
 
         for settings in settings_rows:
+            if await self._bot_left_guild(settings["guild_id"], now):
+                continue
+            try:
+                await self._sync_guild_membership(settings, now)
+            except Exception:
+                logger.exception(
+                    "Attendance scheduler membership sync failed: guild_id=%s",
+                    settings["guild_id"],
+                )
+            try:
+                await self.session_service.recover_missed_sessions(
+                    guild_id=settings["guild_id"],
+                    now=now,
+                )
+            except Exception:
+                logger.exception(
+                    "Attendance scheduler missed-session recovery failed: guild_id=%s",
+                    settings["guild_id"],
+                )
             try:
                 result = await self.session_service.prepare_today_session(
                     guild_id=settings["guild_id"],
@@ -136,6 +163,83 @@ class AttendanceScheduler:
         """
 
         await self.session_service.process_overdue_sessions(now=now)
+
+    async def _bot_left_guild(self, guild_id: str, now: datetime) -> bool:
+        """봇이 오프라인일 때 서버에서 제거된 경우를 감지해 표시하고 건너뛴다."""
+
+        if self.bot is None:
+            return False
+        is_ready = getattr(self.bot, "is_ready", None)
+        get_guild = getattr(self.bot, "get_guild", None)
+        if not callable(is_ready) or not callable(get_guild) or not is_ready():
+            return False
+        try:
+            guild = get_guild(int(guild_id))
+        except (TypeError, ValueError):
+            return False
+        if guild is not None:
+            return False
+        try:
+            await self.guild_service.mark_bot_removed(guild_id=int(guild_id), now=now)
+        except Exception:
+            logger.exception("Failed to mark guild as removed: guild_id=%s", guild_id)
+        logger.warning("Bot is no longer in guild; skipping: guild_id=%s", guild_id)
+        return True
+
+    async def _sync_guild_membership(self, settings: dict[str, Any], now: datetime) -> int:
+        """하루 한 번 서버에 없는 활성 대원을 자동으로 제외한다.
+
+        Server Members Intent 없이도 동작하도록 대원별 REST 조회를 사용한다.
+        조회 실패(권한, 네트워크)는 무시하고 명확한 NotFound만 탈퇴로 본다.
+        """
+
+        if self.bot is None or self.member_service is None:
+            return 0
+        guild_id = str(settings["guild_id"])
+        today = get_server_today(now, settings["timezone"]).isoformat()
+        if self._membership_synced_on.get(guild_id) == today:
+            return 0
+        get_guild = getattr(self.bot, "get_guild", None)
+        guild = None if not callable(get_guild) else get_guild(int(guild_id))
+        if guild is None:
+            return 0
+
+        removed = 0
+        members = await self.member_service.list_active_members(guild_id=int(guild_id))
+        for member in members:
+            discord_id = int(member["discord_id"])
+            if guild.get_member(discord_id) is not None:
+                continue
+            try:
+                await guild.fetch_member(discord_id)
+                continue
+            except discord.NotFound:
+                pass
+            except Exception:
+                logger.warning(
+                    "Member lookup failed; keeping active: guild_id=%s discord_id=%s",
+                    guild_id,
+                    discord_id,
+                    exc_info=True,
+                )
+                continue
+            bot_user = getattr(self.bot, "user", None)
+            if await deactivate_departed_member(
+                member_service=self.member_service,
+                guild_id=int(guild_id),
+                discord_id=discord_id,
+                display_name=str(member["display_name"]),
+                actor_discord_id=0 if bot_user is None else int(bot_user.id),
+            ):
+                removed += 1
+        self._membership_synced_on[guild_id] = today
+        if removed:
+            logger.info(
+                "Departed members deactivated by daily sync: guild_id=%s count=%s",
+                guild_id,
+                removed,
+            )
+        return removed
 
     @tasks.loop(minutes=1)
     async def _loop(self) -> None:

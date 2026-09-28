@@ -341,8 +341,35 @@ class GuildRepository:
         finally:
             await connection.close()
 
+    async def set_bot_removed_at(
+        self,
+        *,
+        guild_id: str,
+        removed_at: str | None,
+        now: str,
+    ) -> bool:
+        """봇 제거 시각을 기록하거나(재입장 시) 지운다. 설정 행이 있으면 ``True``."""
+
+        connection = await self.database.connect()
+        try:
+            cursor = await connection.execute(
+                """
+                UPDATE guild_settings
+                SET bot_removed_at = ?, updated_at = ?
+                WHERE guild_id = ?;
+                """,
+                (removed_at, now, guild_id),
+            )
+            await connection.commit()
+            return cursor.rowcount > 0
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
     async def list_all_settings(self) -> list[dict[str, Any]]:
-        """설정이 완료된 모든 서버 설정을 조회한다.
+        """봇이 아직 참여 중인(제거되지 않은) 설정 완료 서버를 조회한다.
 
         Returns:
             자동 스케줄러가 순회할 guild_settings 행 목록.
@@ -373,9 +400,11 @@ class GuildRepository:
                     voice_channel_ids,
                     voice_category_ids,
                     exempt_absence_counts_in_attendance_denominator,
+                    bot_removed_at,
                     created_at,
                     updated_at
                 FROM guild_settings
+                WHERE bot_removed_at IS NULL
                 ORDER BY guild_id;
                 """
             )

@@ -295,6 +295,7 @@ def create_schedulers(
         voice_verification_service=services.voice_verification,
         time_provider=time_provider,
         check_in_view=check_in_view,
+        member_service=services.member,
     )
     backup_scheduler = BackupScheduler(
         backup_service=BackupService(

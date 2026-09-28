@@ -64,6 +64,36 @@ class SettingsCog(commands.Cog):
         self.guild_service = guild_service
         self.time_provider = time_provider or TimeProvider()
 
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild) -> None:
+        """봇이 서버에서 제거되면 자동 출석 작업 대상에서 제외한다."""
+
+        try:
+            marked = await self.guild_service.mark_bot_removed(
+                guild_id=guild.id,
+                now=self.time_provider.now_utc(),
+            )
+        except Exception:
+            logger.exception("Guild removal bookkeeping failed: guild_id=%s", guild.id)
+            return
+        if marked:
+            logger.info("Bot removed from configured guild: guild_id=%s", guild.id)
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        """봇이 서버에 다시 들어오면 기존 설정을 그대로 되살린다."""
+
+        try:
+            restored = await self.guild_service.mark_bot_present(
+                guild_id=guild.id,
+                now=self.time_provider.now_utc(),
+            )
+        except Exception:
+            logger.exception("Guild join bookkeeping failed: guild_id=%s", guild.id)
+            return
+        if restored:
+            logger.info("Bot rejoined configured guild: guild_id=%s", guild.id)
+
     @settings.command(name="초기화", description="근태관리봇을 현재 서버에 처음 설정합니다.")
     @app_commands.rename(
         officer_role="간부역할",

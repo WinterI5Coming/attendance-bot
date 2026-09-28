@@ -149,6 +149,8 @@ class SessionRepository:
         opened_at: str | None,
         member_ids: list[int],
         now: str,
+        cancelled_at: str | None = None,
+        cancel_reason: str | None = None,
     ) -> dict[str, Any]:
         """세션과 참여자 스냅샷을 하나의 트랜잭션으로 생성한다.
 
@@ -190,10 +192,12 @@ class SessionRepository:
                     no_participation_penalty,
                     status,
                     opened_at,
+                    cancelled_at,
+                    cancel_reason,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     guild_id,
@@ -207,6 +211,8 @@ class SessionRepository:
                     no_participation_penalty,
                     status,
                     opened_at,
+                    cancelled_at,
+                    cancel_reason,
                     now,
                     now,
                 ),
@@ -242,6 +248,27 @@ class SessionRepository:
         except Exception:
             await connection.rollback()
             raise
+        finally:
+            await connection.close()
+
+    async def get_latest_attendance_date(self, *, guild_id: str) -> str | None:
+        """서버에서 가장 최근에 만들어진 세션의 출석일(YYYY-MM-DD)을 반환한다."""
+
+        connection = await self.database.connect()
+        try:
+            cursor = await connection.execute(
+                """
+                SELECT MAX(attendance_date) AS latest
+                FROM attendance_sessions
+                WHERE guild_id = ?;
+                """,
+                (guild_id,),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            if row is None or row["latest"] is None:
+                return None
+            return str(row["latest"])
         finally:
             await connection.close()
 

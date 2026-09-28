@@ -120,6 +120,24 @@ class GuildService:
             str(guild_id)
         )
 
+    async def mark_bot_removed(self, *, guild_id: int, now: datetime) -> bool:
+        """봇이 서버에서 제거되었음을 기록해 자동 작업 대상에서 제외한다."""
+
+        return await self.repository.set_bot_removed_at(
+            guild_id=str(guild_id),
+            removed_at=now.isoformat(),
+            now=now.isoformat(),
+        )
+
+    async def mark_bot_present(self, *, guild_id: int, now: datetime) -> bool:
+        """봇이 서버에 다시 들어왔을 때 제거 표시를 지운다."""
+
+        return await self.repository.set_bot_removed_at(
+            guild_id=str(guild_id),
+            removed_at=None,
+            now=now.isoformat(),
+        )
+
     async def list_all_settings(self) -> list[dict[str, Any]]:
         """자동 출석 작업이 순회할 모든 서버 설정을 조회한다.
 

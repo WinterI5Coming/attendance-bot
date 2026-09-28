@@ -19,6 +19,43 @@ from bot.ui.embed_factory import EMBEDS
 
 logger = logging.getLogger(__name__)
 
+DEPARTED_MEMBER_REASON = "서버 탈퇴 (자동 감지)"
+
+
+async def deactivate_departed_member(
+    *,
+    member_service: MemberService,
+    guild_id: int,
+    discord_id: int,
+    display_name: str,
+    actor_discord_id: int,
+) -> bool:
+    """서버에 더 이상 없는 활성 대원을 비활성화한다. 실제로 제외되면 ``True``."""
+
+    try:
+        result = await member_service.deactivate_member(
+            guild_id=guild_id,
+            discord_id=discord_id,
+            display_name=display_name,
+            reason=DEPARTED_MEMBER_REASON,
+            actor_discord_id=actor_discord_id,
+        )
+    except Exception:
+        logger.exception(
+            "Departed member deactivation failed: guild_id=%s discord_id=%s",
+            guild_id,
+            discord_id,
+        )
+        return False
+    if result.outcome is MemberDeactivationOutcome.DEACTIVATED:
+        logger.info(
+            "Departed member deactivated: guild_id=%s discord_id=%s",
+            guild_id,
+            discord_id,
+        )
+        return True
+    return False
+
 
 class MembersCog(commands.Cog):
     """대원 등록, 제외, 목록 조회 관련 슬래시 명령어."""
@@ -38,6 +75,24 @@ class MembersCog(commands.Cog):
 
         self.guild_service = guild_service
         self.member_service = member_service
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        """서버를 떠난 대원을 자동으로 출석 대상에서 제외한다.
+
+        Server Members Intent가 켜져 있을 때만 이 이벤트가 도착한다. 꺼져 있으면
+        스케줄러의 일일 대원 동기화가 같은 처리를 대신한다.
+        """
+
+        if member.bot:
+            return
+        await deactivate_departed_member(
+            member_service=self.member_service,
+            guild_id=member.guild.id,
+            discord_id=member.id,
+            display_name=member.display_name,
+            actor_discord_id=member.guild.me.id if member.guild.me else 0,
+        )
 
     @members.command(name="등록", description="Discord 사용자를 출석 대원으로 등록합니다.")
     @app_commands.rename(

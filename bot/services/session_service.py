@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -29,6 +29,10 @@ DEFAULT_VERIFICATION_END_TIME = "23:00"
 DEFAULT_REQUIRED_VOICE_MINUTES = 60
 DEFAULT_EARLY_LEAVE_PENALTY = -1
 DEFAULT_NO_PARTICIPATION_PENALTY = -2
+
+# 봇이 꺼져 있던 동안 놓친 출석일을 되돌아볼 최대 일수.
+MISSED_SESSION_LOOKBACK_DAYS = 7
+MISSED_SESSION_CANCEL_REASON = "봇 미가동으로 출석 세션이 열리지 않아 자동 취소되었습니다."
 
 
 logger = logging.getLogger(__name__)
@@ -104,6 +108,13 @@ class RecoveryResult:
     already_closed_count: int = 0
     cancelled_count: int = 0
     failed_sessions: int = 0
+
+
+@dataclass(frozen=True)
+class MissedSessionRecoveryResult:
+    """봇 다운타임 동안 열리지 못한 출석일을 표시한 결과."""
+
+    created_dates: tuple[str, ...] = ()
 
 
 class SessionService:
@@ -284,6 +295,97 @@ class SessionService:
             timezone_name=timezone_name,
             attendance_date=attendance_date,
         )
+
+    async def recover_missed_sessions(
+        self,
+        *,
+        guild_id: int | str,
+        now: datetime,
+        lookback_days: int = MISSED_SESSION_LOOKBACK_DAYS,
+    ) -> MissedSessionRecoveryResult:
+        """봇이 꺼져 있어 세션이 아예 만들어지지 않은 지난 출석일을 표시한다.
+
+        마지막 세션 다음 날부터 어제까지의 출석일 중 세션이 없는 날짜에
+        CANCELLED 세션을 만든다. 아무도 체크인할 수 없었던 날이므로 결석이나
+        감점을 남기지 않고, 운영자가 `/출석 수정`으로 실제 출석을 보정할 수
+        있도록 대원 스냅샷만 남긴다. 세션이 하나도 없는 새 서버는 건너뛴다.
+        """
+
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be a timezone-aware datetime.")
+
+        guild_id_text = str(guild_id)
+        settings = await self.guild_repository.get_by_guild_id(guild_id_text)
+        if settings is None:
+            return MissedSessionRecoveryResult()
+
+        latest_text = await self.session_repository.get_latest_attendance_date(
+            guild_id=guild_id_text,
+        )
+        if latest_text is None:
+            return MissedSessionRecoveryResult()
+
+        timezone_name = settings["timezone"]
+        local_today = get_server_today(now, timezone_name)
+        latest = date.fromisoformat(latest_text)
+        first_candidate = max(
+            latest + timedelta(days=1),
+            local_today - timedelta(days=lookback_days),
+        )
+        created: list[str] = []
+        current = first_candidate
+        while current < local_today:
+            attendance_date = current.isoformat()
+            current += timedelta(days=1)
+            existing = await self.session_repository.get_by_guild_and_date(
+                guild_id=guild_id_text,
+                attendance_date=attendance_date,
+            )
+            if existing is not None:
+                continue
+            policy = await self._resolve_attendance_policy(
+                guild_id=guild_id_text,
+                settings=settings,
+                attendance_date=attendance_date,
+                local_date=date.fromisoformat(attendance_date),
+            )
+            if not policy["attendance_enabled"]:
+                continue
+            window = build_session_window(
+                attendance_date=date.fromisoformat(attendance_date),
+                attendance_start=policy["start_time"],
+                late_deadline=policy["late_time"],
+                close_deadline=policy["close_time"],
+                timezone_name=timezone_name,
+            )
+            active_members = await self.member_repository.list_active_with_ids(
+                guild_id=guild_id_text,
+            )
+            now_text = now.isoformat()
+            try:
+                await self.session_repository.create_with_members(
+                    guild_id=guild_id_text,
+                    attendance_date=attendance_date,
+                    start_at=window.start_at.isoformat(),
+                    late_at=window.late_at.isoformat(),
+                    close_at=window.close_at.isoformat(),
+                    status="CANCELLED",
+                    opened_at=None,
+                    cancelled_at=now_text,
+                    cancel_reason=MISSED_SESSION_CANCEL_REASON,
+                    member_ids=[int(member["id"]) for member in active_members],
+                    now=now_text,
+                )
+            except aiosqlite.IntegrityError:
+                continue
+            created.append(attendance_date)
+            logger.warning(
+                "Missed attendance session marked as cancelled: guild_id=%s date=%s",
+                guild_id_text,
+                attendance_date,
+            )
+
+        return MissedSessionRecoveryResult(created_dates=tuple(created))
 
     async def _resolve_attendance_policy(
         self,
