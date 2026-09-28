@@ -296,6 +296,7 @@ def create_schedulers(
         time_provider=time_provider,
         check_in_view=check_in_view,
         member_service=services.member,
+        heartbeat_path=settings.db_path.parent / "heartbeat",
     )
     backup_scheduler = BackupScheduler(
         backup_service=BackupService(

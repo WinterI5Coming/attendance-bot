@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 
 import discord
@@ -14,6 +16,8 @@ from bot.scheduler.attendance_loop import AttendanceScheduler
 from bot.scheduler.backup_loop import BackupScheduler
 
 logger = logging.getLogger(__name__)
+
+COMMAND_SIGNATURE_KEY = "global_command_signature"
 
 
 class AttendanceBot(commands.Bot):
@@ -94,8 +98,7 @@ class AttendanceBot(commands.Bot):
                 self.settings.development_guild_id,
             )
         else:
-            synced_commands = await self.tree.sync()
-            logger.info("Synced %d global slash commands.", len(synced_commands))
+            await self._sync_global_commands_if_changed()
 
         self.attendance_scheduler.bot = self
         await self.attendance_scheduler.recover_overdue_sessions(
@@ -105,10 +108,75 @@ class AttendanceBot(commands.Bot):
         self.backup_scheduler.start()
 
     async def close(self) -> None:
-        """Discord 연결을 닫기 전에 백그라운드 스케줄러를 먼저 중지한다."""
+        """스케줄러를 멈추고 종료 백업을 남긴 뒤 Discord 연결을 닫는다."""
 
+        if self.is_closed():
+            await super().close()
+            return
         logger.info("Discord bot shutdown requested.")
         self.attendance_scheduler.stop()
         self.backup_scheduler.stop()
+        try:
+            await self.backup_scheduler.run_shutdown_backup(self.time_provider.now_utc())
+        except Exception:
+            logger.exception("Shutdown backup failed.")
         await super().close()
         logger.info("Discord bot closed.")
+
+    async def _sync_global_commands_if_changed(self) -> None:
+        """명령 정의가 지난 동기화와 같으면 글로벌 동기화를 건너뛴다.
+
+        재시작마다 글로벌 동기화를 하면 크래시 루프 시 Discord 속도 제한에 걸리고,
+        어차피 정의가 같으면 반영될 내용도 없다.
+        """
+
+        signature = self._command_signature()
+        previous = await self._get_runtime_value(COMMAND_SIGNATURE_KEY)
+        if signature is not None and previous == signature:
+            logger.info("Global slash commands unchanged; sync skipped.")
+            return
+        synced_commands = await self.tree.sync()
+        logger.info("Synced %d global slash commands.", len(synced_commands))
+        if signature is not None:
+            await self._set_runtime_value(COMMAND_SIGNATURE_KEY, signature)
+
+    def _command_signature(self) -> str | None:
+        """현재 명령 트리의 정의를 해시한다. 계산할 수 없으면 ``None``."""
+
+        try:
+            payload = [command.to_dict(self.tree) for command in self.tree.get_commands()]
+            encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        except Exception:
+            logger.debug("Command signature unavailable; forcing sync.", exc_info=True)
+            return None
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    async def _get_runtime_value(self, key: str) -> str | None:
+        connection = await self.database.connect()
+        try:
+            cursor = await connection.execute(
+                "SELECT value FROM runtime_state WHERE key = ?;", (key,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            return None if row is None else str(row["value"])
+        finally:
+            await connection.close()
+
+    async def _set_runtime_value(self, key: str, value: str) -> None:
+        now = self.time_provider.now_utc().isoformat()
+        connection = await self.database.connect()
+        try:
+            await connection.execute(
+                """
+                INSERT INTO runtime_state (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at;
+                """,
+                (key, value, now),
+            )
+            await connection.commit()
+        finally:
+            await connection.close()

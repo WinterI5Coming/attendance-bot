@@ -222,6 +222,7 @@ async def test_excuse_flow_approve_refreshes_pending_list():
     flow.excuse_service.list_requests = AsyncMock(
         return_value=ExcuseResult(status=ExcuseStatus.APPROVED, request={"rows": []})
     )
+    flow.can_review = AsyncMock(return_value=True)
     interaction = MagicMock()
     interaction.guild.id = 111
     interaction.user.id = 9
@@ -235,3 +236,48 @@ async def test_excuse_flow_approve_refreshes_pending_list():
     assert kwargs["view"] is None
     assert isinstance(flow.time_provider.now_utc(), datetime)
     assert flow.time_provider.now_utc().tzinfo is UTC
+
+
+@pytest.mark.asyncio
+async def test_excuse_flow_rechecks_officer_permission_before_deciding():
+    """검토 화면을 연 뒤 역할이 회수된 사용자는 승인/거절할 수 없다."""
+
+    flow = _flow()
+    flow.excuse_service.approve_request = AsyncMock()
+    flow.can_review = AsyncMock(return_value=False)
+    interaction = MagicMock()
+    interaction.guild.id = 111
+    interaction.response.is_done = MagicMock(return_value=False)
+    interaction.response.send_message = AsyncMock()
+
+    await flow.approve(interaction, 7)
+
+    flow.excuse_service.approve_request.assert_not_awaited()
+    assert "간부" in interaction.response.send_message.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_review_view_timeout_disables_components_and_edits_message():
+    flow = _flow()
+    row = {"id": 7, "target_date": "2026-07-03", "excuse_type": "ABSENCE", "discord_id": "1",
+           "display_name": "홍길동"}
+    view = ExcuseReviewView(flow, [row])
+    view.message = MagicMock()
+    view.message.edit = AsyncMock()
+
+    await view.on_timeout()
+
+    assert all(item.disabled for item in view.children)
+    assert "만료" in view.message.edit.await_args.kwargs["content"]
+
+
+@pytest.mark.asyncio
+async def test_check_in_view_on_error_replies_without_raising():
+    view = CheckInView(attendance_service=MagicMock(), time_provider=TimeProvider())
+    interaction = MagicMock()
+    interaction.response.is_done = MagicMock(return_value=True)
+    interaction.followup.send = AsyncMock(side_effect=RuntimeError("expired"))
+
+    await view.on_error(interaction, ValueError("boom"), view.children[0])
+
+    interaction.followup.send.assert_awaited_once()

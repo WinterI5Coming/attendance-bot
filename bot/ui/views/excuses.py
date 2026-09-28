@@ -14,7 +14,13 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from bot.cogs.common import require_guild_settings, require_officer
+from bot.cogs.common import (
+    GUILD_ONLY_MESSAGE,
+    OFFICER_ONLY_MESSAGE,
+    has_officer_access,
+    require_guild_settings,
+    require_officer,
+)
 from bot.runtime.time_provider import TimeProvider
 from bot.services.excuse_policy import EXCUSE_TYPE_LABELS
 from bot.services.excuse_service import ExcuseService, ExcuseStatus
@@ -73,6 +79,7 @@ class ExcuseFlow:
 
         guild = interaction.guild
         if guild is None:
+            await interaction.response.send_message(GUILD_ONLY_MESSAGE, ephemeral=True)
             return
         result = await self.excuse_service.create_request(
             guild_id=guild.id,
@@ -123,11 +130,22 @@ class ExcuseFlow:
             return
         assert interaction.guild is not None
         rows = await self.list_pending(interaction.guild.id, interaction.user.id)
+        view = ExcuseReviewView(self, rows) if rows else None
         await interaction.response.send_message(
             embed=self._pending_embed(rows),
-            view=ExcuseReviewView(self, rows) if rows else None,
+            view=view,
             ephemeral=True,
         )
+        if view is not None:
+            try:
+                view.message = await interaction.original_response()
+            except Exception:
+                logger.debug("Could not capture review message for timeout handling.", exc_info=True)
+
+    async def can_review(self, interaction: discord.Interaction) -> bool:
+        """승인/거절 시점에 간부 권한을 다시 확인한다(뷰가 열린 뒤 역할이 바뀔 수 있다)."""
+
+        return await has_officer_access(interaction, self.guild_service)
 
     async def refresh_review(
         self,
@@ -147,6 +165,9 @@ class ExcuseFlow:
 
     async def approve(self, interaction: discord.Interaction, request_id: int) -> None:
         assert interaction.guild is not None
+        if not await self.can_review(interaction):
+            await _reply_error(interaction, OFFICER_ONLY_MESSAGE)
+            return
         result = await self.excuse_service.approve_request(
             guild_id=interaction.guild.id,
             excuse_request_id=request_id,
@@ -157,6 +178,9 @@ class ExcuseFlow:
 
     async def reject(self, interaction: discord.Interaction, request_id: int, reason: str) -> None:
         assert interaction.guild is not None
+        if not await self.can_review(interaction):
+            await _reply_error(interaction, OFFICER_ONLY_MESSAGE)
+            return
         result = await self.excuse_service.reject_request(
             guild_id=interaction.guild.id,
             excuse_request_id=request_id,
@@ -240,6 +264,15 @@ class ExcuseNoticeView(discord.ui.View):
     async def _on_review(self, interaction: discord.Interaction) -> None:
         await self.flow.open_review(interaction)
 
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item[Any],
+    ) -> None:
+        logger.exception("Excuse notice view failed.", exc_info=error)
+        await _reply_error(interaction, "사유 검토 화면을 여는 중 오류가 발생했습니다.")
+
 
 class ExcuseReviewView(discord.ui.View):
     """대기 신청 선택 메뉴와 승인/거절 버튼. 비공개 메시지에서만 사용한다."""
@@ -249,6 +282,7 @@ class ExcuseReviewView(discord.ui.View):
         self.flow = flow
         self.rows = {int(row["id"]): row for row in rows}
         self.selected_id: int | None = None
+        self.message: Any | None = None
 
         self.select: discord.ui.Select = discord.ui.Select(
             placeholder="검토할 사유 신청을 선택하세요",
@@ -297,6 +331,22 @@ class ExcuseReviewView(discord.ui.View):
             return
         await interaction.response.send_modal(RejectReasonModal(self.flow, self.selected_id))
 
+    async def on_timeout(self) -> None:
+        """만료된 검토 화면의 컴포넌트를 비활성화해 눌러도 실패하는 상태를 막는다."""
+
+        for item in self.children:
+            if hasattr(item, "disabled"):
+                item.disabled = True  # type: ignore[attr-defined]
+        if self.message is None:
+            return
+        try:
+            await self.message.edit(
+                content="⏱️ 검토 화면이 만료되었습니다. `/사유 검토`로 다시 여세요.",
+                view=self,
+            )
+        except Exception:
+            logger.debug("Review view timeout edit failed.", exc_info=True)
+
     async def on_error(
         self,
         interaction: discord.Interaction,
@@ -331,7 +381,12 @@ class RejectReasonModal(discord.ui.Modal, title="사유 신청 거절"):
 
 
 async def _reply_error(interaction: discord.Interaction, content: str) -> None:
-    if interaction.response.is_done():
-        await interaction.followup.send(content, ephemeral=True)
-    else:
-        await interaction.response.send_message(content, ephemeral=True)
+    """오류 안내를 보낸다. 상호작용이 이미 만료된 경우에도 예외를 밖으로 내지 않는다."""
+
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(content, ephemeral=True)
+        else:
+            await interaction.response.send_message(content, ephemeral=True)
+    except Exception:
+        logger.debug("Failed to deliver error reply.", exc_info=True)

@@ -10,6 +10,7 @@ venv/
 
 # SQLite data
 data/*.db
+data/heartbeat
 data/*.db-shm
 data/*.db-wal
 data/backups/

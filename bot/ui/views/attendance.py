@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import discord
 
@@ -82,3 +83,21 @@ class CheckInView(discord.ui.View):
             return
 
         await interaction.followup.send(build_check_in_message(result), ephemeral=True)
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item[Any],
+    ) -> None:
+        """버튼 처리 중 예외가 나도 사용자에게 안내를 남긴다."""
+
+        logger.exception("Check-in view failed.", exc_info=error)
+        message = "❌ 출석 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except Exception:
+            logger.debug("Failed to report check-in error to user.", exc_info=True)

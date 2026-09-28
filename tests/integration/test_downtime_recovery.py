@@ -195,3 +195,76 @@ async def test_scheduler_marks_guild_removed_when_bot_is_not_in_it(
     )
     restored = await guild_repository.list_all_settings()
     assert GUILD_ID in {row["guild_id"] for row in restored}
+
+
+class _DeadChannel:
+    async def send(self, **kwargs):
+        raise discord.Forbidden(
+            SimpleNamespace(status=403, reason="Forbidden"),
+            {"message": "Missing Access", "code": 50001},
+        )
+
+
+class _LiveChannel:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def send(self, **kwargs):
+        self.messages.append(kwargs)
+        return SimpleNamespace(id=len(self.messages))
+
+
+class _ChannelBot:
+    """공지 채널(2)은 권한이 없고 출석 채널(1)만 보낼 수 있는 봇 대역."""
+
+    def __init__(self, channels: dict[int, object]) -> None:
+        self.channels = channels
+
+    def get_channel(self, channel_id: int):
+        return self.channels.get(channel_id)
+
+    async def fetch_channel(self, channel_id: int):
+        raise discord.NotFound(
+            SimpleNamespace(status=404, reason="Not Found"),
+            {"message": "Unknown Channel", "code": 10003},
+        )
+
+
+async def test_announcement_falls_back_to_attendance_channel_and_never_loops(
+    database, guild_repository, member_repository
+):
+    await configure_guild(database)
+    await create_member(member_repository, "2001", "A")
+    live = _LiveChannel()
+    scheduler = AttendanceScheduler(
+        guild_service=FakeGuildService(guild_repository),
+        session_service=build_session_service(database, guild_repository, member_repository),
+        bot=_ChannelBot({1: live, 2: _DeadChannel()}),
+    )
+
+    await scheduler.run_once(utc_dt(12, 30, day=2))
+    sessions = await list_sessions(database)
+
+    assert len(live.messages) == 1
+    assert sessions[0]["start_announced_at"] is not None
+    assert sessions[0]["start_announcement_message_id"] == "1"
+
+
+async def test_announcement_with_no_usable_channel_is_marked_skipped(
+    database, guild_repository, member_repository
+):
+    await configure_guild(database)
+    await create_member(member_repository, "2001", "A")
+    scheduler = AttendanceScheduler(
+        guild_service=FakeGuildService(guild_repository),
+        session_service=build_session_service(database, guild_repository, member_repository),
+        bot=_ChannelBot({}),
+    )
+
+    await scheduler.run_once(utc_dt(12, 30, day=2))
+    await scheduler.run_once(utc_dt(12, 31, day=2))
+    sessions = await list_sessions(database)
+
+    # 채널이 모두 사라졌으면 공지를 생략으로 기록하고 매분 재시도하지 않는다.
+    assert sessions[0]["start_announced_at"] is not None
+    assert sessions[0]["start_announcement_message_id"] is None

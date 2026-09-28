@@ -1,7 +1,7 @@
 """SQLite 백업 서비스를 주기적으로 실행하는 스케줄러."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from discord.ext import tasks
 
@@ -9,6 +9,11 @@ from bot.runtime.time_provider import TimeProvider
 from bot.services.backup_service import BackupService
 
 logger = logging.getLogger(__name__)
+
+
+# 종료 백업은 마지막 백업이 이 시간보다 오래됐을 때만 만든다. 짧은 재시작이
+# 반복되어도 보관 슬롯을 최근 사본으로 밀어내지 않게 한다.
+SHUTDOWN_BACKUP_MIN_INTERVAL = timedelta(hours=1)
 
 
 class BackupScheduler:
@@ -58,10 +63,25 @@ class BackupScheduler:
         date_key = now.astimezone(UTC).date().isoformat()
         if self._last_backup_date == date_key:
             return False
+        # 프로세스가 재시작돼도 같은 날 백업을 다시 만들지 않도록 파일로 확인한다.
+        if self.backup_service.has_backup_for_date(date_key.replace("-", "")):
+            self._last_backup_date = date_key
+            return False
 
         await self.backup_service.create_backup(now=now)
         self._last_backup_date = date_key
         return True
+
+    async def run_shutdown_backup(self, now: datetime) -> bool:
+        """정상 종료 직전에 최근 백업이 오래됐으면 한 번 더 백업한다."""
+
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be a timezone-aware datetime.")
+        latest = self.backup_service.latest_backup_time()
+        if latest is not None and now - latest < SHUTDOWN_BACKUP_MIN_INTERVAL:
+            return False
+        result = await self.backup_service.create_backup(now=now)
+        return result.created
 
     @tasks.loop(hours=1)
     async def _loop(self) -> None:

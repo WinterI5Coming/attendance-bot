@@ -43,6 +43,20 @@ class BackupService:
         self.backup_directory = backup_directory or database.db_path.parent / "backups"
         self.retention_count = retention_count
 
+    def has_backup_for_date(self, date_key: str) -> bool:
+        """해당 UTC 날짜(YYYYMMDD)에 만든 백업 파일이 이미 있는지 확인한다."""
+
+        return any(self.backup_directory.glob(f"attendance-{date_key}-*.db"))
+
+    def latest_backup_time(self) -> datetime | None:
+        """가장 최근 백업 파일의 수정 시각(UTC)을 반환한다. 없으면 ``None``."""
+
+        backups = list(self.backup_directory.glob("attendance-*.db"))
+        if not backups:
+            return None
+        latest = max(path.stat().st_mtime for path in backups)
+        return datetime.fromtimestamp(latest, tz=UTC)
+
     async def create_backup(self, *, now: datetime | None = None) -> BackupResult:
         """타임스탬프가 붙은 DB 백업을 만들고 오래된 백업을 정리한다."""
 

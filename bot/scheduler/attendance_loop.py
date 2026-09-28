@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import discord
@@ -18,7 +19,11 @@ from bot.ui.attendance_messages import (
     build_start_announcement_embed,
 )
 from bot.ui.views.attendance import CheckInView
-from bot.utils.discord_channels import edit_channel_message, send_channel_message
+from bot.utils.discord_channels import (
+    DeliveryOutcome,
+    deliver_channel_message,
+    edit_channel_message,
+)
 from bot.utils.time_utils import get_server_today
 
 logger = logging.getLogger(__name__)
@@ -37,6 +42,7 @@ class AttendanceScheduler:
         bot: Any | None = None,
         check_in_view: CheckInView | None = None,
         member_service: MemberService | None = None,
+        heartbeat_path: Path | None = None,
     ) -> None:
         """
         스케줄러 의존성을 초기화한다.
@@ -57,6 +63,7 @@ class AttendanceScheduler:
         self.bot = bot
         self.check_in_view = check_in_view
         self.member_service = member_service
+        self.heartbeat_path = heartbeat_path
         self._started = False
         # 서버별로 대원 동기화를 마지막으로 실행한 서버 로컬 날짜.
         self._membership_synced_on: dict[str, str] = {}
@@ -132,7 +139,10 @@ class AttendanceScheduler:
                     settings["guild_id"],
                 )
 
-        await self._announce_starts(now)
+        try:
+            await self._announce_starts(now)
+        except Exception:
+            logger.exception("Attendance scheduler start announcements failed.")
 
         try:
             await self.session_service.process_overdue_sessions(now=now)
@@ -147,13 +157,49 @@ class AttendanceScheduler:
             except Exception:
                 logger.exception("Attendance verification finalization failed.")
 
-        await self._announce_closes(now)
+        try:
+            await self._announce_closes(now)
+        except Exception:
+            logger.exception("Attendance scheduler close announcements failed.")
 
         if self.voice_verification_service is not None:
             try:
                 await self.voice_verification_service.record_heartbeat(now=now)
             except Exception:
                 logger.exception("Scheduler heartbeat failed.")
+        self._touch_heartbeat_file()
+
+    def _touch_heartbeat_file(self) -> None:
+        """컨테이너 HEALTHCHECK가 확인하는 하트비트 파일의 수정 시각을 갱신한다."""
+
+        if self.heartbeat_path is None:
+            return
+        try:
+            self.heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+            self.heartbeat_path.touch()
+        except OSError:
+            logger.warning("Heartbeat file update failed: %s", self.heartbeat_path, exc_info=True)
+
+    async def _deliver_announcement(
+        self,
+        session: dict[str, Any],
+        **kwargs: Any,
+    ) -> DeliveryOutcome:
+        """공지 채널에 보내고, 채널이 없거나 권한이 없으면 출석 채널로 대체한다."""
+
+        primary = session["announcement_channel_id"] or session["attendance_channel_id"]
+        outcome = await deliver_channel_message(self.bot, primary, **kwargs)
+        if outcome.ok or not outcome.permanent_failure:
+            return outcome
+        fallback = session["attendance_channel_id"]
+        if fallback and str(fallback) != str(primary):
+            logger.warning(
+                "Announcement channel unusable (%s); falling back to attendance channel: guild_id=%s",
+                outcome.reason,
+                session["guild_id"],
+            )
+            outcome = await deliver_channel_message(self.bot, fallback, **kwargs)
+        return outcome
 
     async def recover_overdue_sessions(self, now: datetime) -> None:
         """주기 루프 시작 전에 재시작 복구를 한 번 실행한다.
@@ -258,19 +304,32 @@ class AttendanceScheduler:
 
         sessions = await self.session_service.list_start_announcement_targets()
         for session in sessions:
-            channel_id = session["announcement_channel_id"] or session["attendance_channel_id"]
-            message = await send_channel_message(
-                self.bot,
-                channel_id,
+            outcome = await self._deliver_announcement(
+                session,
                 embed=build_start_announcement_embed(session),
                 view=self.check_in_view,
             )
-            if message is None:
+            if not outcome.ok:
+                if outcome.permanent_failure:
+                    # 채널 삭제/권한 부족은 다음 분에도 똑같이 실패한다. 무한 재시도
+                    # 대신 공지 생략으로 기록하고, 대원은 /출석 체크인으로 출석한다.
+                    logger.error(
+                        "Start announcement skipped permanently (%s): guild_id=%s session_id=%s. "
+                        "Check /설정 조회 channel settings and bot permissions.",
+                        outcome.reason,
+                        session["guild_id"],
+                        session["id"],
+                    )
+                    await self.session_service.mark_start_announced(
+                        session_id=int(session["id"]),
+                        now=now,
+                        message_id=None,
+                    )
                 continue
             await self.session_service.mark_start_announced(
                 session_id=int(session["id"]),
                 now=now,
-                message_id=str(getattr(message, "id", "")) or None,
+                message_id=str(getattr(outcome.message, "id", "")) or None,
             )
 
     async def _announce_closes(self, now: datetime) -> None:
@@ -289,12 +348,22 @@ class AttendanceScheduler:
                     session["start_announcement_message_id"],
                     view=self.check_in_view.closed(),
                 )
-            message = await send_channel_message(
-                self.bot,
-                channel_id,
+            outcome = await self._deliver_announcement(
+                session,
                 embed=build_close_announcement_embed(session),
             )
-            if message is None:
+            if not outcome.ok:
+                if outcome.permanent_failure:
+                    logger.error(
+                        "Close announcement skipped permanently (%s): guild_id=%s session_id=%s",
+                        outcome.reason,
+                        session["guild_id"],
+                        session["id"],
+                    )
+                    await self.session_service.mark_close_announced(
+                        session_id=int(session["id"]),
+                        now=now,
+                    )
                 continue
             await self.session_service.mark_close_announced(
                 session_id=int(session["id"]),
