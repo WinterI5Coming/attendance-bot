@@ -440,16 +440,29 @@ class SessionService:
                 }
 
         attendance_days = parse_attendance_days(settings["attendance_days"])
+
+        def setting(key: str, default):
+            value = settings.get(key)
+            return default if value is None else value
+
         return {
             "attendance_enabled": get_weekday_code(local_date) in attendance_days,
             "voice_enabled": bool(settings.get("voice_verification_enabled", 0)),
             "start_time": settings["attendance_start"],
             "late_time": settings["late_deadline"],
             "close_time": settings["close_deadline"],
-            "verification_end_time": DEFAULT_VERIFICATION_END_TIME,
-            "required_voice_minutes": DEFAULT_REQUIRED_VOICE_MINUTES,
-            "early_leave_penalty": DEFAULT_EARLY_LEAVE_PENALTY,
-            "no_participation_penalty": DEFAULT_NO_PARTICIPATION_PENALTY,
+            "verification_end_time": str(
+                setting("voice_verification_end_time", DEFAULT_VERIFICATION_END_TIME)
+            ),
+            "required_voice_minutes": int(
+                setting("voice_required_minutes", DEFAULT_REQUIRED_VOICE_MINUTES)
+            ),
+            "early_leave_penalty": int(
+                setting("voice_early_leave_penalty", DEFAULT_EARLY_LEAVE_PENALTY)
+            ),
+            "no_participation_penalty": int(
+                setting("voice_no_participation_penalty", DEFAULT_NO_PARTICIPATION_PENALTY)
+            ),
         }
 
     async def close_session(

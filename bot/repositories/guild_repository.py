@@ -56,6 +56,10 @@ class GuildRepository:
                     voice_verification_enabled,
                     voice_channel_ids,
                     voice_category_ids,
+                    voice_required_minutes,
+                    voice_verification_end_time,
+                    voice_early_leave_penalty,
+                    voice_no_participation_penalty,
                     exempt_absence_counts_in_attendance_denominator,
                     created_at,
                     updated_at
@@ -245,6 +249,10 @@ class GuildRepository:
             "voice_verification_enabled",
             "voice_channel_ids",
             "voice_category_ids",
+            "voice_required_minutes",
+            "voice_verification_end_time",
+            "voice_early_leave_penalty",
+            "voice_no_participation_penalty",
             "exempt_absence_counts_in_attendance_denominator",
         }
         invalid_fields = set(fields) - allowed_fields
@@ -399,6 +407,10 @@ class GuildRepository:
                     voice_verification_enabled,
                     voice_channel_ids,
                     voice_category_ids,
+                    voice_required_minutes,
+                    voice_verification_end_time,
+                    voice_early_leave_penalty,
+                    voice_no_participation_penalty,
                     exempt_absence_counts_in_attendance_denominator,
                     bot_removed_at,
                     created_at,

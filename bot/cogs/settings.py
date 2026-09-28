@@ -38,6 +38,10 @@ SETTING_FIELD_CHOICES = [
         "voice_verification_enabled",
         "voice_channel_ids",
         "voice_category_ids",
+        "voice_required_minutes",
+        "voice_verification_end_time",
+        "voice_early_leave_penalty",
+        "voice_no_participation_penalty",
     )
 ]
 
@@ -187,7 +191,14 @@ class SettingsCog(commands.Cog):
                 f"excuse_mode: {settings['excuse_mode']}\n"
                 f"officer_role_id: {settings['officer_role_id']}\n"
                 f"attendance_channel_id: {settings['attendance_channel_id']}\n"
-                f"announcement_channel_id: {settings['announcement_channel_id']}"
+                f"announcement_channel_id: {settings['announcement_channel_id']}\n"
+                f"voice_verification_enabled: {settings.get('voice_verification_enabled')}\n"
+                f"voice_channel_ids: {settings.get('voice_channel_ids') or '-'}\n"
+                f"voice_category_ids: {settings.get('voice_category_ids') or '-'}\n"
+                f"voice_required_minutes: {settings.get('voice_required_minutes')}\n"
+                f"voice_verification_end_time: {settings.get('voice_verification_end_time')}\n"
+                f"voice_early_leave_penalty: {settings.get('voice_early_leave_penalty')}\n"
+                f"voice_no_participation_penalty: {settings.get('voice_no_participation_penalty')}"
             ),
             ephemeral=True,
         )
@@ -274,12 +285,24 @@ class SettingsCog(commands.Cog):
             ephemeral=True,
         )
 
-    @settings.command(name="음성검증", description="출석 후 음성 채널 체류 검증을 켜거나 끄고 대상 채널을 지정합니다.")
-    @app_commands.rename(enabled="사용", voice_channel="채널", category="카테고리")
+    @settings.command(name="음성검증", description="출석 후 음성 채널 체류 검증을 켜거나 끄고 대상 채널과 규칙을 지정합니다.")
+    @app_commands.rename(
+        enabled="사용",
+        voice_channel="채널",
+        category="카테고리",
+        required_minutes="요구시간",
+        end_time="검증마감",
+        early_leave_penalty="시간부족감점",
+        no_participation_penalty="미참여감점",
+    )
     @app_commands.describe(
         enabled="True면 체크인 후 음성 채널 체류 시간을 검증합니다.",
         voice_channel="검증 대상 음성 채널 (지정하면 기존 채널 목록을 대체)",
         category="검증 대상 카테고리 (안의 모든 음성 채널 인정, 지정하면 기존 목록을 대체)",
+        required_minutes="검증 성공에 필요한 체류 시간(분). 기본 60",
+        end_time="검증 마감 시각 HH:MM(서버 시간대). 기본 23:00. 마감+요구시간보다 이르면 자동으로 늦춰집니다.",
+        early_leave_penalty="체류 시간 부족 시 감점(0 또는 음수). 기본 -1",
+        no_participation_penalty="음성 미참여 시 감점(0 또는 음수). 기본 -2",
     )
     async def configure_voice_verification(
         self,
@@ -287,6 +310,10 @@ class SettingsCog(commands.Cog):
         enabled: bool,
         voice_channel: discord.VoiceChannel | None = None,
         category: discord.CategoryChannel | None = None,
+        required_minutes: app_commands.Range[int, 1, 1440] | None = None,
+        end_time: str | None = None,
+        early_leave_penalty: app_commands.Range[int, -100, 0] | None = None,
+        no_participation_penalty: app_commands.Range[int, -100, 0] | None = None,
     ) -> None:
         """/설정 음성검증 명령을 처리한다."""
 
@@ -295,12 +322,6 @@ class SettingsCog(commands.Cog):
             return
         guild = interaction.guild
         assert guild is not None
-
-        updates: list[tuple[str, str]] = [("voice_verification_enabled", "1" if enabled else "0")]
-        if voice_channel is not None:
-            updates.append(("voice_channel_ids", str(voice_channel.id)))
-        if category is not None:
-            updates.append(("voice_category_ids", str(category.id)))
 
         has_targets = bool(
             voice_channel or category or settings.get("voice_channel_ids") or settings.get("voice_category_ids")
@@ -312,23 +333,27 @@ class SettingsCog(commands.Cog):
             )
             return
 
-        for db_field, value in updates:
-            result = await self.admin_service.update_setting(
-                guild_id=guild.id,
-                field=db_field,
-                value=value,
-                actor_discord_id=interaction.user.id,
-                has_permission=True,
-                now=self.time_provider.now_utc(),
+        result = await self.admin_service.update_voice_verification(
+            guild_id=guild.id,
+            enabled=enabled,
+            voice_channel_id=None if voice_channel is None else str(voice_channel.id),
+            voice_category_id=None if category is None else str(category.id),
+            required_minutes=required_minutes,
+            verification_end_time=None if end_time is None else end_time.strip(),
+            early_leave_penalty=early_leave_penalty,
+            no_participation_penalty=no_participation_penalty,
+            actor_discord_id=interaction.user.id,
+            has_permission=True,
+            now=self.time_provider.now_utc(),
+        )
+        if result.status is not SettingsUpdateStatus.UPDATED:
+            await interaction.response.send_message(
+                self._settings_update_message(SettingsUpdateResult(status=result.status)),
+                ephemeral=True,
             )
-            if result.status is not SettingsUpdateStatus.UPDATED:
-                await interaction.response.send_message(
-                    self._settings_update_message(result),
-                    ephemeral=True,
-                )
-                return
+            return
 
-        updated = await self.guild_service.get_settings(guild.id) or settings
+        updated = result.settings or settings
         targets = [f"<#{cid}>" for cid in (updated.get("voice_channel_ids") or "").split(",") if cid] + [
             f"카테고리 <#{cid}>" for cid in (updated.get("voice_category_ids") or "").split(",") if cid
         ]
@@ -336,9 +361,18 @@ class SettingsCog(commands.Cog):
             embed=EMBEDS.success(
                 "음성 검증 설정 저장",
                 "체크인 후 정해진 시간 이상 음성 채널에 머물러야 검증이 완료됩니다. "
-                "미참여/부족 시 감점이 별도 이벤트로 기록됩니다.",
+                "미참여/부족 시 감점이 별도 이벤트로 기록됩니다. "
+                "새 규칙은 다음에 만들어지는 출석 세션부터 적용됩니다.",
                 fields=(
                     ("사용 여부", "켜짐" if enabled else "꺼짐", True),
+                    ("요구 시간", f"{updated.get('voice_required_minutes')}분", True),
+                    ("검증 마감", str(updated.get("voice_verification_end_time")), True),
+                    (
+                        "감점",
+                        f"미참여 {updated.get('voice_no_participation_penalty')} / "
+                        f"시간 부족 {updated.get('voice_early_leave_penalty')}",
+                        True,
+                    ),
                     ("대상", ", ".join(targets) or "없음", False),
                     ("확인", "`/출석 검증현황`으로 오늘 진행 상황을 볼 수 있습니다.", False),
                 ),

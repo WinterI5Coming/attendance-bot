@@ -139,7 +139,7 @@ async def test_attendance_tables_exist_after_migration(migrated_database):
             ORDER BY version;
             """
         )
-        assert [row["version"] for row in migration_rows] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        assert [row["version"] for row in migration_rows] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     finally:
         await connection.close()
 

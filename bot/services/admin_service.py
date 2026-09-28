@@ -62,6 +62,15 @@ class SettingsUpdateResult:
 
 
 @dataclass(frozen=True)
+class VoiceVerificationUpdateResult:
+    """`/설정 음성검증` 일괄 변경 결과."""
+
+    status: SettingsUpdateStatus
+    field: str | None = None
+    settings: dict | None = None
+
+
+@dataclass(frozen=True)
 class SessionControlResult:
     """오늘 출석 세션 취소 또는 재개 결과."""
 
@@ -155,6 +164,97 @@ class AdminService:
             await connection.close()
 
         return normalized
+
+    async def update_voice_verification(
+        self,
+        *,
+        guild_id: int | str,
+        enabled: bool,
+        voice_channel_id: str | None,
+        voice_category_id: str | None,
+        required_minutes: int | None,
+        verification_end_time: str | None,
+        early_leave_penalty: int | None,
+        no_participation_penalty: int | None,
+        actor_discord_id: int | str,
+        has_permission: bool,
+        now: datetime,
+    ) -> VoiceVerificationUpdateResult:
+        """음성 검증 관련 설정을 검증한 뒤 하나의 트랜잭션으로 저장한다.
+
+        ``None``으로 넘어온 항목은 바꾸지 않는다. 채널/카테고리는 지정 시 기존
+        목록을 대체한다. 부분 적용을 막기 위해 모든 항목을 함께 커밋한다.
+        """
+
+        require_aware(now)
+        if not has_permission:
+            return VoiceVerificationUpdateResult(status=SettingsUpdateStatus.PERMISSION_DENIED)
+        guild_id_text = str(guild_id)
+        settings = await self.guild_repository.get_by_guild_id(guild_id_text)
+        if settings is None:
+            return VoiceVerificationUpdateResult(status=SettingsUpdateStatus.NOT_CONFIGURED)
+
+        raw_updates: list[tuple[str, str]] = [
+            ("voice_verification_enabled", "1" if enabled else "0"),
+        ]
+        if voice_channel_id is not None:
+            raw_updates.append(("voice_channel_ids", voice_channel_id))
+        if voice_category_id is not None:
+            raw_updates.append(("voice_category_ids", voice_category_id))
+        if required_minutes is not None:
+            raw_updates.append(("voice_required_minutes", str(required_minutes)))
+        if verification_end_time is not None:
+            raw_updates.append(("voice_verification_end_time", verification_end_time))
+        if early_leave_penalty is not None:
+            raw_updates.append(("voice_early_leave_penalty", str(early_leave_penalty)))
+        if no_participation_penalty is not None:
+            raw_updates.append(("voice_no_participation_penalty", str(no_participation_penalty)))
+
+        fields: dict[str, str] = {}
+        for field, value in raw_updates:
+            normalized = self._normalize_setting(field, value, settings)
+            if normalized.status is not SettingsUpdateStatus.UPDATED:
+                return VoiceVerificationUpdateResult(status=normalized.status, field=field)
+            assert normalized.field is not None and normalized.value is not None
+            fields[normalized.field] = normalized.value
+
+        now_text = now.isoformat()
+        connection = await self.guild_repository.database.connect()
+        try:
+            await connection.execute("BEGIN IMMEDIATE;")
+            await self.guild_repository.update_settings(
+                guild_id=guild_id_text,
+                fields=fields,
+                now=now_text,
+                connection=connection,
+            )
+            await self.audit_repository.create_log(
+                guild_id=guild_id_text,
+                actor_discord_id=str(actor_discord_id),
+                action_type="GUILD_SETTINGS_UPDATED",
+                target_type="SETTING",
+                target_id="voice_verification",
+                before_json=json.dumps(
+                    {field: settings.get(field) for field in fields},
+                    ensure_ascii=False,
+                ),
+                after_json=json.dumps(fields, ensure_ascii=False),
+                reason="voice verification settings update",
+                created_at=now_text,
+                connection=connection,
+            )
+            await connection.commit()
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
+        updated = await self.guild_repository.get_by_guild_id(guild_id_text)
+        return VoiceVerificationUpdateResult(
+            status=SettingsUpdateStatus.UPDATED,
+            settings=updated,
+        )
 
     async def cancel_today_session(
         self,
@@ -411,6 +511,10 @@ class AdminService:
             "voice_verification_enabled": "voice_verification_enabled",
             "voice_channel_ids": "voice_channel_ids",
             "voice_category_ids": "voice_category_ids",
+            "voice_required_minutes": "voice_required_minutes",
+            "voice_verification_end_time": "voice_verification_end_time",
+            "voice_early_leave_penalty": "voice_early_leave_penalty",
+            "voice_no_participation_penalty": "voice_no_participation_penalty",
         }
         if normalized_field not in aliases:
             return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_FIELD)
@@ -457,6 +561,24 @@ class AdminService:
                 if not ids or any(not item.isdigit() for item in ids):
                     return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
                 cleaned_value = ",".join(dict.fromkeys(ids))
+        elif db_field == "voice_required_minutes":
+            if not cleaned_value.isdigit() or not 1 <= int(cleaned_value) <= 24 * 60:
+                return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
+            cleaned_value = str(int(cleaned_value))
+        elif db_field == "voice_verification_end_time":
+            try:
+                parse_hhmm(cleaned_value)
+            except ValueError:
+                return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
+        elif db_field in {"voice_early_leave_penalty", "voice_no_participation_penalty"}:
+            try:
+                penalty = int(cleaned_value)
+            except ValueError:
+                return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
+            # 감점은 0 또는 음수만 허용한다. 양수를 넣으면 실패가 가점이 된다.
+            if penalty > 0 or penalty < -100:
+                return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
+            cleaned_value = str(penalty)
         elif db_field.endswith("_id"):
             if cleaned_value and not cleaned_value.isdigit():
                 return SettingsUpdateResult(status=SettingsUpdateStatus.INVALID_VALUE)
