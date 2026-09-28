@@ -228,6 +228,7 @@ def create_services(*, settings: Settings, repositories: RepositorySet) -> Servi
         score_repository=repositories.score,
         excuse_repository=repositories.excuse,
         audit_repository=repositories.audit,
+        voice_verification_service=voice_verification_service,
     )
 
     report_service = ReportService(
@@ -251,6 +252,7 @@ def create_services(*, settings: Settings, repositories: RepositorySet) -> Servi
         session_repository=repositories.session,
         score_repository=repositories.score,
         audit_repository=repositories.audit,
+        voice_verification_service=voice_verification_service,
     )
 
     return ServiceSet(

@@ -17,7 +17,7 @@ from bot.utils.permissions import has_officer_permission, is_server_admin
 
 GUILD_ONLY_MESSAGE = "🚫 이 명령어는 Discord 서버에서만 사용할 수 있습니다."
 NOT_CONFIGURED_MESSAGE = (
-    "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /초기설정을 실행해주세요."
+    "⚙️ 아직 초기설정이 완료되지 않았습니다. 먼저 /설정 초기화를 실행해주세요."
 )
 OFFICER_ONLY_MESSAGE = "🚫 간부 또는 서버 관리자만 사용할 수 있는 명령어입니다."
 ADMIN_ONLY_MESSAGE = "🚫 서버 소유자 또는 관리자만 사용할 수 있는 명령어입니다."

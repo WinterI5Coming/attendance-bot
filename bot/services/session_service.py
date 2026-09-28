@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -213,6 +213,14 @@ class SessionService:
             hhmm=policy["verification_end_time"],
             timezone_name=timezone_name,
         )
+        # 마감 직전에 체크인한 대원도 요구 시간을 채울 수 있도록 검증 종료를
+        # 최소 "마감 + 요구 시간"까지 보장한다. 이렇게 하면 검증 마감이 항상
+        # 세션 마감 이후가 되어 취소 가능한 세션에 감점이 붙는 일도 없다.
+        minimum_end_at = window.close_at + timedelta(
+            minutes=int(policy["required_voice_minutes"])
+        )
+        if verification_end_at < minimum_end_at:
+            verification_end_at = minimum_end_at
 
         if now >= window.close_at:
             return SessionPrepareResult(

@@ -122,6 +122,12 @@ class AttendanceScheduler:
 
         await self._announce_closes(now)
 
+        if self.voice_verification_service is not None:
+            try:
+                await self.voice_verification_service.record_heartbeat(now=now)
+            except Exception:
+                logger.exception("Scheduler heartbeat failed.")
+
     async def recover_overdue_sessions(self, now: datetime) -> None:
         """주기 루프 시작 전에 재시작 복구를 한 번 실행한다.
 

@@ -18,6 +18,15 @@ from bot.utils.time_utils import (
 
 logger = logging.getLogger(__name__)
 
+# 스케줄러가 마지막으로 살아 있던 시각을 저장하는 runtime_state 키.
+# 재시작 후 놓친 음성 퇴장을 이 시각 기준으로 닫아 과다 집계를 막는다.
+HEARTBEAT_KEY = "scheduler_heartbeat_at"
+
+WAIVE_REASON_SESSION_CANCELLED = "SESSION_CANCELLED"
+WAIVE_REASON_ATTENDANCE_CORRECTED = "ATTENDANCE_CORRECTED"
+WAIVE_REASON_EXCUSE_APPROVED = "EXCUSE_APPROVED"
+WAIVE_REASON_VERIFICATION_DISABLED = "VERIFICATION_DISABLED"
+
 
 VERIFIABLE_ATTENDANCE_STATUSES = {
     "PRESENT",
@@ -34,6 +43,15 @@ class VerificationFinalizeResult:
     verified: int = 0
     failed: int = 0
     penalties: int = 0
+
+
+@dataclass(frozen=True)
+class VoiceReconcileResult:
+    """재시작 후 실제 음성 채널 상태와 열린 로그를 맞춘 결과."""
+
+    pending: int = 0
+    closed_logs: int = 0
+    opened_logs: int = 0
 
 
 @dataclass(frozen=True)
@@ -172,7 +190,7 @@ class VoiceVerificationService:
             channel_id=None if after_channel_id is None else str(after_channel_id),
             category_id=None if after_category_id is None else str(after_category_id),
         )
-        if before_is_target == after_is_target and before_channel_id == after_channel_id:
+        if before_channel_id == after_channel_id:
             return
 
         member = await self.member_repository.get_by_discord_id(
@@ -197,18 +215,45 @@ class VoiceVerificationService:
         if verification is None:
             return
 
+        if not before_is_target and not after_is_target:
+            # 검증 대상이 아닌 채널 사이의 이동이지만, 대상 채널이 설정에서
+            # 빠졌거나 퇴장 이벤트를 놓친 경우 열린 로그가 남아 있을 수 있다.
+            open_log = await self.stage_a_repository.get_open_voice_log(
+                session_id=int(session["id"]),
+                member_id=int(member["id"]),
+            )
+            if open_log is None:
+                return
+
         now_text = now.isoformat()
         connection = await self.stage_a_repository.database.connect()
         try:
             await connection.execute("BEGIN IMMEDIATE;")
-            if before_is_target:
-                await self._close_current_voice_log(
-                    session_id=int(session["id"]),
-                    member_id=int(member["id"]),
-                    now=now,
-                    close_reason="MOVED" if after_is_target else "LEFT",
-                    connection=connection,
-                )
+            open_log = await self.stage_a_repository.get_open_voice_log(
+                session_id=int(session["id"]),
+                member_id=int(member["id"]),
+                connection=connection,
+            )
+            if open_log is not None:
+                if open_log["voice_channel_id"] == str(before_channel_id):
+                    # 정상적인 퇴장/이동: 지금 시각까지 체류를 인정한다.
+                    # (대상 목록에서 빠진 채널을 나가는 경우도 실제 퇴장이다.)
+                    await self._close_voice_log(
+                        open_log=open_log,
+                        left_at=now,
+                        close_reason="MOVED" if after_is_target else "LEFT",
+                        connection=connection,
+                    )
+                else:
+                    # 이전 퇴장 이벤트를 놓친 상태다. 봇이 마지막으로 살아 있던
+                    # 시각까지만 인정해 다운타임 동안의 체류를 과다 집계하지 않는다.
+                    cutoff = await self._reconcile_cutoff(now=now, connection=connection)
+                    await self._close_voice_log(
+                        open_log=open_log,
+                        left_at=cutoff,
+                        close_reason="BOT_RECOVERY",
+                        connection=connection,
+                    )
             if after_is_target and after_channel_id is not None:
                 await self.stage_a_repository.open_voice_log(
                     guild_id=guild_id_text,
@@ -230,6 +275,222 @@ class VoiceVerificationService:
         finally:
             await connection.close()
 
+    async def record_heartbeat(self, *, now: datetime) -> None:
+        """스케줄러가 살아 있음을 기록한다. 재시작 복구의 기준 시각으로 쓰인다."""
+
+        require_aware(now)
+        await self.stage_a_repository.set_runtime_value(
+            key=HEARTBEAT_KEY,
+            value=now.isoformat(),
+            now=now.isoformat(),
+        )
+
+    async def reconcile_guild_voice_presence(
+        self,
+        *,
+        guild_id: int | str,
+        present: dict[str, tuple[str, str | None]],
+        now: datetime,
+    ) -> VoiceReconcileResult:
+        """재시작 직후 실제 음성 채널 재실 상태와 열린 로그를 맞춘다.
+
+        Args:
+            guild_id: Discord guild ID.
+            present: 현재 음성 채널에 있는 사용자 매핑
+                ``{discord_id: (channel_id, category_id)}``.
+            now: Current timezone-aware UTC time.
+
+        다운타임 동안 나간 대원의 열린 로그는 마지막 하트비트 시각까지만 인정하고
+        닫는다. 다운타임 동안 들어온 대원은 입장 시각을 알 수 없으므로 지금부터
+        인정한다. 검증 대기 중인 대원만 대상으로 한다.
+        """
+
+        require_aware(now)
+        guild_id_text = str(guild_id)
+        settings = await self.guild_repository.get_by_guild_id(guild_id_text)
+        if settings is None or not settings.get("voice_verification_enabled"):
+            return VoiceReconcileResult()
+
+        attendance_date = get_server_today(now, settings["timezone"]).isoformat()
+        session = await self.session_repository.get_by_guild_and_date(
+            guild_id=guild_id_text,
+            attendance_date=attendance_date,
+        )
+        if session is None:
+            return VoiceReconcileResult()
+
+        pending = await self.stage_a_repository.list_pending_verifications_for_session(
+            session_id=int(session["id"]),
+        )
+        if not pending:
+            return VoiceReconcileResult()
+
+        closed = opened = 0
+        now_text = now.isoformat()
+        connection = await self.stage_a_repository.database.connect()
+        try:
+            await connection.execute("BEGIN IMMEDIATE;")
+            cutoff = await self._reconcile_cutoff(now=now, connection=connection)
+            for verification in pending:
+                location = present.get(str(verification["discord_id"]))
+                in_target = location is not None and self.is_configured_voice_channel(
+                    settings=settings,
+                    channel_id=location[0],
+                    category_id=location[1],
+                )
+                open_log = await self.stage_a_repository.get_open_voice_log(
+                    session_id=int(session["id"]),
+                    member_id=int(verification["member_id"]),
+                    connection=connection,
+                )
+                if open_log is not None and (
+                    not in_target or open_log["voice_channel_id"] != str(location[0])
+                ):
+                    await self._close_voice_log(
+                        open_log=open_log,
+                        left_at=cutoff,
+                        close_reason="BOT_RECOVERY",
+                        connection=connection,
+                    )
+                    closed += 1
+                    open_log = None
+                if in_target and open_log is None:
+                    await self.stage_a_repository.open_voice_log(
+                        guild_id=guild_id_text,
+                        session_id=int(session["id"]),
+                        member_id=int(verification["member_id"]),
+                        voice_channel_id=str(location[0]),
+                        joined_at=now_text,
+                        connection=connection,
+                    )
+                    opened += 1
+                await self._refresh_or_verify(
+                    verification=verification,
+                    now=now,
+                    connection=connection,
+                )
+            await connection.commit()
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
+        logger.info(
+            "Voice presence reconciled: guild_id=%s pending=%s closed=%s opened=%s",
+            guild_id_text,
+            len(pending),
+            closed,
+            opened,
+        )
+        return VoiceReconcileResult(
+            pending=len(pending),
+            closed_logs=closed,
+            opened_logs=opened,
+        )
+
+    async def waive_verification_for_record(
+        self,
+        *,
+        attendance_record_id: int,
+        waived_reason: str,
+        actor_discord_id: str | None,
+        now: datetime,
+        connection,
+    ) -> bool:
+        """출석 기록 하나의 검증을 면제하고, 이미 부과된 감점이 있으면 되돌린다.
+
+        출석 정정으로 결석이 되었거나 조퇴 사유가 승인된 경우처럼 음성 참여
+        요구가 더 이상 의미 없을 때 호출한다. 호출자의 트랜잭션 안에서 실행된다.
+        """
+
+        require_aware(now)
+        verification = await self.stage_a_repository.get_verification_by_record_id(
+            attendance_record_id=attendance_record_id,
+            connection=connection,
+        )
+        if verification is None or verification["status"] not in {"PENDING", "FAILED"}:
+            return False
+        now_text = now.isoformat()
+        await self._close_current_voice_log(
+            session_id=int(verification["session_id"]),
+            member_id=int(verification["member_id"]),
+            now=now,
+            close_reason="VERIFICATION_ENDED",
+            connection=connection,
+        )
+        await self.stage_a_repository.waive_verification(
+            verification_id=int(verification["id"]),
+            waived_reason=waived_reason,
+            now=now_text,
+            connection=connection,
+        )
+        if verification["status"] == "FAILED":
+            await self._reverse_failure_penalty(
+                verification=verification,
+                actor_discord_id=actor_discord_id,
+                now=now.isoformat(),
+                connection=connection,
+            )
+        return True
+
+    async def waive_session_verifications(
+        self,
+        *,
+        session_id: int,
+        waived_reason: str,
+        now: datetime,
+        connection,
+    ) -> int:
+        """세션의 대기 중인 검증을 모두 면제한다(세션 취소 시)."""
+
+        require_aware(now)
+        pending = await self.stage_a_repository.list_pending_verifications_for_session(
+            session_id=session_id,
+            connection=connection,
+        )
+        for verification in pending:
+            await self.stage_a_repository.waive_verification(
+                verification_id=int(verification["id"]),
+                waived_reason=waived_reason,
+                now=now.isoformat(),
+                connection=connection,
+            )
+        return len(pending)
+
+    async def restore_session_verifications(
+        self,
+        *,
+        session_id: int,
+        waived_reason: str,
+        now: datetime,
+        connection,
+    ) -> int:
+        """세션 취소로 면제된 검증을 다시 대기 상태로 되돌린다(세션 재개 시)."""
+
+        require_aware(now)
+        waived = await self.stage_a_repository.list_waived_verifications_for_session(
+            session_id=session_id,
+            waived_reason=waived_reason,
+            connection=connection,
+        )
+        restored = 0
+        for verification in waived:
+            if verification["verified_at"] is not None:
+                status = "VERIFIED"
+            elif verification["failed_at"] is not None:
+                status = "FAILED"
+            else:
+                status = "PENDING"
+            await self.stage_a_repository.restore_verification(
+                verification_id=int(verification["id"]),
+                status=status,
+                now=now.isoformat(),
+                connection=connection,
+            )
+            restored += 1
+        return restored
+
     async def finalize_due_verifications(
         self,
         *,
@@ -238,58 +499,43 @@ class VoiceVerificationService:
         """종료 시간이 지난 대기 검증을 마무리한다."""
 
         require_aware(now)
-        now_text = now.isoformat()
         connection = await self.stage_a_repository.database.connect()
         processed = verified = failed = penalties = 0
         try:
             await connection.execute("BEGIN IMMEDIATE;")
             pending = await self.stage_a_repository.list_pending_verifications(
-                now=now_text,
+                now=now.isoformat(),
                 connection=connection,
             )
+            settings_cache: dict[str, dict[str, Any] | None] = {}
             for verification in pending:
-                processed += 1
-                await self._close_current_voice_log(
-                    session_id=int(verification["session_id"]),
-                    member_id=int(verification["member_id"]),
-                    now=now,
-                    close_reason="VERIFICATION_ENDED",
-                    connection=connection,
-                )
-                accumulated = await self._calculate_accumulated_seconds(
-                    verification=verification,
-                    now=now,
-                    connection=connection,
-                )
-                if accumulated >= int(verification["required_seconds"]):
-                    await self.stage_a_repository.mark_verified(
-                        verification_id=int(verification["id"]),
-                        accumulated_seconds=accumulated,
-                        now=now_text,
-                        connection=connection,
-                    )
-                    verified += 1
-                else:
-                    failure_reason = (
-                        "NO_VOICE_JOIN"
-                        if accumulated == 0
-                        else "INSUFFICIENT_DURATION"
-                    )
-                    await self.stage_a_repository.mark_failed(
-                        verification_id=int(verification["id"]),
-                        accumulated_seconds=accumulated,
-                        failure_reason=failure_reason,
-                        now=now_text,
-                        connection=connection,
-                    )
-                    if await self._create_failure_penalty(
+                # 검증 하나가 실패해도 나머지 처리가 함께 롤백되지 않도록
+                # 행 단위 SAVEPOINT로 격리한다.
+                await connection.execute("SAVEPOINT verification_row;")
+                try:
+                    outcome = await self._finalize_one(
                         verification=verification,
-                        failure_reason=failure_reason,
-                        now=now_text,
+                        now=now,
+                        settings_cache=settings_cache,
                         connection=connection,
-                    ):
-                        penalties += 1
+                    )
+                    await connection.execute("RELEASE SAVEPOINT verification_row;")
+                except Exception:
+                    await connection.execute("ROLLBACK TO SAVEPOINT verification_row;")
+                    await connection.execute("RELEASE SAVEPOINT verification_row;")
+                    logger.exception(
+                        "Verification finalize failed: verification_id=%s",
+                        verification["id"],
+                    )
+                    continue
+                processed += 1
+                if outcome == "VERIFIED":
+                    verified += 1
+                elif outcome == "FAILED":
                     failed += 1
+                elif outcome == "FAILED_WITH_PENALTY":
+                    failed += 1
+                    penalties += 1
             await connection.commit()
         except Exception:
             await connection.rollback()
@@ -412,6 +658,80 @@ class VoiceVerificationService:
                 connection=connection,
             )
 
+    async def _finalize_one(
+        self,
+        *,
+        verification: dict[str, Any],
+        now: datetime,
+        settings_cache: dict[str, dict[str, Any] | None],
+        connection,
+    ) -> str:
+        """검증 하나를 마무리하고 결과 종류를 문자열로 반환한다."""
+
+        now_text = now.isoformat()
+        session = await self.session_repository.get_by_id(
+            session_id=int(verification["session_id"]),
+            connection=connection,
+        )
+        guild_id = None if session is None else session["guild_id"]
+        if guild_id is not None and guild_id not in settings_cache:
+            settings_cache[guild_id] = await self.guild_repository.get_by_guild_id(guild_id)
+        settings = None if guild_id is None else settings_cache[guild_id]
+
+        # 세션이 취소되었거나 검증 기능이 꺼진 서버라면 감점 없이 면제한다.
+        if session is None or session["status"] == "CANCELLED":
+            waived_reason = WAIVE_REASON_SESSION_CANCELLED
+        elif settings is None or not settings.get("voice_verification_enabled"):
+            waived_reason = WAIVE_REASON_VERIFICATION_DISABLED
+        else:
+            waived_reason = None
+
+        await self._close_current_voice_log(
+            session_id=int(verification["session_id"]),
+            member_id=int(verification["member_id"]),
+            now=now,
+            close_reason="VERIFICATION_ENDED",
+            connection=connection,
+        )
+        if waived_reason is not None:
+            await self.stage_a_repository.waive_verification(
+                verification_id=int(verification["id"]),
+                waived_reason=waived_reason,
+                now=now.isoformat(),
+                connection=connection,
+            )
+            return "WAIVED"
+
+        accumulated = await self._calculate_accumulated_seconds(
+            verification=verification,
+            now=now,
+            connection=connection,
+        )
+        if accumulated >= int(verification["required_seconds"]):
+            await self.stage_a_repository.mark_verified(
+                verification_id=int(verification["id"]),
+                accumulated_seconds=accumulated,
+                now=now.isoformat(),
+                connection=connection,
+            )
+            return "VERIFIED"
+
+        failure_reason = "NO_VOICE_JOIN" if accumulated == 0 else "INSUFFICIENT_DURATION"
+        await self.stage_a_repository.mark_failed(
+            verification_id=int(verification["id"]),
+            accumulated_seconds=accumulated,
+            failure_reason=failure_reason,
+            now=now_text,
+            connection=connection,
+        )
+        created = await self._create_failure_penalty(
+            verification=verification,
+            failure_reason=failure_reason,
+            now=now_text,
+            connection=connection,
+        )
+        return "FAILED_WITH_PENALTY" if created else "FAILED"
+
     async def _close_current_voice_log(
         self,
         *,
@@ -430,15 +750,82 @@ class VoiceVerificationService:
         )
         if open_log is None:
             return
+        await self._close_voice_log(
+            open_log=open_log,
+            left_at=now,
+            close_reason=close_reason,
+            connection=connection,
+        )
+
+    async def _close_voice_log(
+        self,
+        *,
+        open_log: dict[str, Any],
+        left_at: datetime,
+        close_reason: str,
+        connection,
+    ) -> None:
+        """열린 로그를 ``left_at`` 시각에 닫는다. 입장 시각보다 이르면 0초로 닫는다."""
+
         joined_at = datetime.fromisoformat(open_log["joined_at"])
-        duration = max(0, int((now - joined_at).total_seconds()))
+        effective_left = max(joined_at, left_at)
+        duration = max(0, int((effective_left - joined_at).total_seconds()))
         await self.stage_a_repository.close_voice_log(
             voice_log_id=int(open_log["id"]),
-            left_at=now.isoformat(),
+            left_at=effective_left.isoformat(),
             duration_seconds=duration,
             close_reason=close_reason,
             connection=connection,
         )
+
+    async def _reconcile_cutoff(self, *, now: datetime, connection) -> datetime:
+        """놓친 퇴장을 닫을 기준 시각(마지막 하트비트, 없으면 지금)을 반환한다."""
+
+        heartbeat = await self.stage_a_repository.get_runtime_value(
+            key=HEARTBEAT_KEY,
+            connection=connection,
+        )
+        if heartbeat is None:
+            return now
+        try:
+            parsed = datetime.fromisoformat(heartbeat)
+        except ValueError:
+            return now
+        if parsed.tzinfo is None:
+            return now
+        return min(parsed, now)
+
+    async def _reverse_failure_penalty(
+        self,
+        *,
+        verification: dict[str, Any],
+        actor_discord_id: str | None,
+        now: str,
+        connection,
+    ) -> bool:
+        """검증 실패 감점이 아직 유효하면 반대 이벤트로 되돌린다."""
+
+        penalty = await self.stage_a_repository.get_failure_penalty_event(
+            verification_id=int(verification["id"]),
+            connection=connection,
+        )
+        if penalty is None or int(penalty["delta"]) == 0:
+            return False
+        await self.score_repository.create_reversal_event(
+            guild_id=penalty["guild_id"],
+            member_id=int(penalty["member_id"]),
+            event_type="VOICE_PENALTY_WAIVED",
+            delta=-int(penalty["delta"]),
+            reference_type="VOICE_VERIFICATION",
+            reference_id=int(verification["id"]),
+            dedup_key=f"voice-verification:{verification['id']}:waive:{penalty['id']}",
+            description="음성 검증 면제로 감점 취소",
+            created_by_discord_id=actor_discord_id,
+            created_at=now,
+            reversed_event_id=int(penalty["id"]),
+            connection=connection,
+        )
+        return True
 
     async def _calculate_accumulated_seconds(
         self,
@@ -497,13 +884,17 @@ class VoiceVerificationService:
         if session is None:
             return False
         if failure_reason == "NO_VOICE_JOIN":
-            delta = int(session["no_participation_penalty"] or -2)
+            configured = session["no_participation_penalty"]
+            delta = -2 if configured is None else int(configured)
             event_type = "NO_PARTICIPATION_PENALTY"
             description = "No voice participation"
         else:
-            delta = int(session["early_leave_penalty"] or -1)
+            configured = session["early_leave_penalty"]
+            delta = -1 if configured is None else int(configured)
             event_type = "EARLY_LEAVE_PENALTY"
             description = "Insufficient voice duration"
+        if delta == 0:
+            return False
         try:
             await self.score_repository.create_event(
                 guild_id=session["guild_id"],

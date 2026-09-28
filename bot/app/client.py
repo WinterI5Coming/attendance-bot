@@ -77,6 +77,9 @@ class AttendanceBot(commands.Bot):
 
         for cog in self._configured_cogs:
             await self.add_cog(cog)
+            attach = getattr(cog, "attach_bot", None)
+            if callable(attach):
+                attach(self)
         for view in self._persistent_views:
             self.add_view(view)
 

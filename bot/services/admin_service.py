@@ -11,6 +11,10 @@ from bot.repositories.audit_repository import AuditRepository
 from bot.repositories.guild_repository import GuildRepository
 from bot.repositories.score_repository import ScoreRepository
 from bot.repositories.session_repository import SessionRepository
+from bot.services.voice_verification_service import (
+    WAIVE_REASON_SESSION_CANCELLED,
+    VoiceVerificationService,
+)
 from bot.utils.time_utils import (
     get_server_today,
     parse_hhmm,
@@ -78,6 +82,7 @@ class AdminService:
         session_repository: SessionRepository,
         score_repository: ScoreRepository,
         audit_repository: AuditRepository,
+        voice_verification_service: VoiceVerificationService | None = None,
     ) -> None:
         """관리자 서비스가 사용할 Repository 의존성을 저장한다."""
 
@@ -85,6 +90,7 @@ class AdminService:
         self.session_repository = session_repository
         self.score_repository = score_repository
         self.audit_repository = audit_repository
+        self.voice_verification_service = voice_verification_service
 
     async def update_setting(
         self,
@@ -205,6 +211,17 @@ class AdminService:
                     connection=connection,
                 )
                 created_reversals += 1
+            waived_verifications = 0
+            if self.voice_verification_service is not None:
+                # 취소된 세션의 음성 검증은 감점 없이 면제한다.
+                waived_verifications = (
+                    await self.voice_verification_service.waive_session_verifications(
+                        session_id=int(session["id"]),
+                        waived_reason=WAIVE_REASON_SESSION_CANCELLED,
+                        now=now,
+                        connection=connection,
+                    )
+                )
             await self.session_repository.cancel_session(
                 session_id=int(session["id"]),
                 reason=cleaned_reason,
@@ -222,6 +239,7 @@ class AdminService:
                     {
                         "status": "CANCELLED",
                         "score_reversals": created_reversals,
+                        "waived_verifications": waived_verifications,
                     },
                     ensure_ascii=False,
                 ),
@@ -300,6 +318,16 @@ class AdminService:
                     connection=connection,
                 )
                 restored += 1
+            restored_verifications = 0
+            if self.voice_verification_service is not None:
+                restored_verifications = (
+                    await self.voice_verification_service.restore_session_verifications(
+                        session_id=int(session["id"]),
+                        waived_reason=WAIVE_REASON_SESSION_CANCELLED,
+                        now=now,
+                        connection=connection,
+                    )
+                )
             await self.session_repository.resume_cancelled_session(
                 session_id=int(session["id"]),
                 status=new_status,
@@ -315,7 +343,11 @@ class AdminService:
                 target_id=str(session["id"]),
                 before_json=json.dumps({"status": "CANCELLED"}, ensure_ascii=False),
                 after_json=json.dumps(
-                    {"status": new_status, "restored_events": restored},
+                    {
+                        "status": new_status,
+                        "restored_events": restored,
+                        "restored_verifications": restored_verifications,
+                    },
                     ensure_ascii=False,
                 ),
                 reason="session resumed",

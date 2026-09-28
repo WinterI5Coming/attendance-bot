@@ -907,6 +907,21 @@ class AttendanceService:
                 ensure_ascii=False,
             )
 
+            if (
+                new_status == "ABSENT"
+                and existing is not None
+                and self.voice_verification_service is not None
+            ):
+                # 결석으로 정정되면 음성 참여 요구는 의미가 없으므로 검증을
+                # 면제하고, 이미 부과된 검증 감점이 있으면 되돌린다.
+                await self.voice_verification_service.waive_verification_for_record(
+                    attendance_record_id=int(record["id"]),
+                    waived_reason="ATTENDANCE_CORRECTED",
+                    actor_discord_id=actor_discord_id,
+                    now=now,
+                    connection=connection,
+                )
+
             if score_delta != 0:
                 await self.score_repository.create_correction_event(
                     guild_id=guild_id,

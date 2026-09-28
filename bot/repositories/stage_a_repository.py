@@ -445,3 +445,176 @@ class StageARepository:
             """,
             (accumulated_seconds, now, verification_id),
         )
+
+    async def set_runtime_value(
+        self,
+        *,
+        key: str,
+        value: str,
+        now: str,
+        connection: aiosqlite.Connection | None = None,
+    ) -> None:
+        """runtime_state 키 하나를 생성하거나 갱신한다."""
+
+        owns_connection = connection is None
+        if connection is None:
+            connection = await self.database.connect()
+        try:
+            await connection.execute(
+                """
+                INSERT INTO runtime_state (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at;
+                """,
+                (key, value, now),
+            )
+            if owns_connection:
+                await connection.commit()
+        except Exception:
+            if owns_connection:
+                await connection.rollback()
+            raise
+        finally:
+            if owns_connection:
+                await connection.close()
+
+    async def get_runtime_value(
+        self,
+        *,
+        key: str,
+        connection: aiosqlite.Connection | None = None,
+    ) -> str | None:
+        """runtime_state 키 하나의 값을 반환한다. 없으면 ``None``."""
+
+        owns_connection = connection is None
+        if connection is None:
+            connection = await self.database.connect()
+        try:
+            cursor = await connection.execute(
+                "SELECT value FROM runtime_state WHERE key = ?;",
+                (key,),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            return None if row is None else str(row["value"])
+        finally:
+            if owns_connection:
+                await connection.close()
+
+    async def list_pending_verifications_for_session(
+        self,
+        *,
+        session_id: int,
+        connection: aiosqlite.Connection | None = None,
+    ) -> list[dict[str, Any]]:
+        """세션의 대기 중인 검증을 대원 Discord ID와 함께 반환한다."""
+
+        owns_connection = connection is None
+        if connection is None:
+            connection = await self.database.connect()
+        try:
+            cursor = await connection.execute(
+                """
+                SELECT av.*, m.discord_id
+                FROM attendance_verifications AS av
+                JOIN members AS m ON m.id = av.member_id
+                WHERE av.session_id = ? AND av.status = 'PENDING'
+                ORDER BY av.id;
+                """,
+                (session_id,),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            return [dict(row) for row in rows]
+        finally:
+            if owns_connection:
+                await connection.close()
+
+    async def list_waived_verifications_for_session(
+        self,
+        *,
+        session_id: int,
+        waived_reason: str,
+        connection: aiosqlite.Connection,
+    ) -> list[dict[str, Any]]:
+        """특정 사유로 면제된 세션 검증 목록을 반환한다."""
+
+        cursor = await connection.execute(
+            """
+            SELECT *
+            FROM attendance_verifications
+            WHERE session_id = ? AND status = 'WAIVED' AND waived_reason = ?
+            ORDER BY id;
+            """,
+            (session_id, waived_reason),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [dict(row) for row in rows]
+
+    async def waive_verification(
+        self,
+        *,
+        verification_id: int,
+        waived_reason: str,
+        now: str,
+        connection: aiosqlite.Connection,
+    ) -> bool:
+        """대기 또는 실패 상태의 검증을 면제 처리한다. 변경되면 ``True``."""
+
+        cursor = await connection.execute(
+            """
+            UPDATE attendance_verifications
+            SET status = 'WAIVED', waived_reason = ?, updated_at = ?
+            WHERE id = ? AND status IN ('PENDING', 'FAILED');
+            """,
+            (waived_reason, now, verification_id),
+        )
+        return cursor.rowcount > 0
+
+    async def restore_verification(
+        self,
+        *,
+        verification_id: int,
+        status: str,
+        now: str,
+        connection: aiosqlite.Connection,
+    ) -> None:
+        """면제된 검증을 이전 상태(PENDING/VERIFIED/FAILED)로 되돌린다."""
+
+        if status not in {"PENDING", "VERIFIED", "FAILED"}:
+            raise ValueError("Restored verification status is invalid.")
+        await connection.execute(
+            """
+            UPDATE attendance_verifications
+            SET status = ?, waived_reason = NULL, updated_at = ?
+            WHERE id = ? AND status = 'WAIVED';
+            """,
+            (status, now, verification_id),
+        )
+
+    async def get_failure_penalty_event(
+        self,
+        *,
+        verification_id: int,
+        connection: aiosqlite.Connection,
+    ) -> dict[str, Any] | None:
+        """검증 실패 감점 이벤트 중 아직 되돌려지지 않은 것을 반환한다."""
+
+        cursor = await connection.execute(
+            """
+            SELECT se.*
+            FROM score_events AS se
+            WHERE se.dedup_key = ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM score_events AS r
+                  WHERE r.reversed_event_id = se.id
+              );
+            """,
+            (f"voice-verification:{verification_id}:failure",),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return None if row is None else dict(row)

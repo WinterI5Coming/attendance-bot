@@ -81,6 +81,7 @@ class ExcuseService:
         score_repository: ScoreRepository,
         excuse_repository: ExcuseRepository,
         audit_repository: AuditRepository,
+        voice_verification_service: Any | None = None,
     ) -> None:
         """서비스 의존성을 초기화한다."""
 
@@ -91,6 +92,7 @@ class ExcuseService:
         self.score_repository = score_repository
         self.excuse_repository = excuse_repository
         self.audit_repository = audit_repository
+        self.voice_verification_service = voice_verification_service
         self.policy_service = ExcusePolicyService()
 
     async def create_request(
@@ -641,6 +643,18 @@ class ExcuseService:
             return {"record": None, "delta": 0}
 
         old_status = record["status"]
+        if (
+            request.get("excuse_type") == "EARLY_LEAVE"
+            and self.voice_verification_service is not None
+        ):
+            # 조퇴가 승인되면 음성 체류 시간 요구를 면제하고 기존 감점을 되돌린다.
+            await self.voice_verification_service.waive_verification_for_record(
+                attendance_record_id=int(record["id"]),
+                waived_reason="EXCUSE_APPROVED",
+                actor_discord_id=actor_discord_id,
+                now=now,
+                connection=connection,
+            )
         if old_status == "PRESENT":
             await self.attendance_repository.set_excuse_request(
                 attendance_record_id=int(record["id"]),

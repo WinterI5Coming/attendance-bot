@@ -1,6 +1,7 @@
 """Discord 음성 상태 이벤트를 출석 검증 서비스로 전달한다."""
 
 import logging
+from typing import Any
 
 import discord
 from discord.ext import commands
@@ -24,6 +25,43 @@ class VoiceTrackingCog(commands.Cog):
 
         self.voice_verification_service = voice_verification_service
         self.time_provider = time_provider or TimeProvider()
+        self.bot: Any | None = None
+
+    def attach_bot(self, bot: Any) -> None:
+        """재시작 복구 시 길드 음성 상태를 읽기 위해 클라이언트를 연결한다."""
+
+        self.bot = bot
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """연결(재연결) 직후 실제 음성 채널 재실 상태와 열린 로그를 맞춘다."""
+
+        await self.reconcile_all_guilds()
+
+    async def reconcile_all_guilds(self) -> None:
+        """봇이 속한 모든 서버의 음성 재실 상태를 검증 로그와 동기화한다."""
+
+        if self.bot is None:
+            return
+        now = self.time_provider.now_utc()
+        for guild in list(getattr(self.bot, "guilds", [])):
+            present: dict[str, tuple[str, str | None]] = {}
+            channels = list(getattr(guild, "voice_channels", [])) + list(
+                getattr(guild, "stage_channels", [])
+            )
+            for channel in channels:
+                category = getattr(channel, "category", None)
+                category_id = None if category is None else str(category.id)
+                for user_id in getattr(channel, "voice_states", {}):
+                    present[str(user_id)] = (str(channel.id), category_id)
+            try:
+                await self.voice_verification_service.reconcile_guild_voice_presence(
+                    guild_id=guild.id,
+                    present=present,
+                    now=now,
+                )
+            except Exception:
+                logger.exception("Voice presence reconcile failed: guild_id=%s", guild.id)
 
     @commands.Cog.listener()
     async def on_voice_state_update(
